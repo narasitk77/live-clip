@@ -60,15 +60,19 @@ docker compose up -d --build
 
 1. **โค้ดอยู่ในรีโป GitHub `narasitk77/live-clip`** ทุก push ขึ้น `main` จะ build อิมเมจ 2 ตัวขึ้น GHCR
    คือ `live-clip-web` และ `live-clip-mediamtx` แท็ก `latest` และ `sha-<commit>`
-2. **stack ใน Portainer** แบบ git-backed ชี้รีโปนี้ compose path = `docker-compose.portainer.yml`
-   ตั้ง env ใน stack: `IMAGE_TAG=sha-<commit>`, `SRT_PASSPHRASE`, `MEDIAMTX_API_PASS`, `WEB_USER`, `WEB_PASSWORD`,
-   `SRT_PUBLIC_HOST=thestandard.fortiddns.com`, `MIN_FREE_GB=200`, `CUT_WORKERS=1` และค่า S3 ถ้ามี
+2. **stack ใน Portainer** ชื่อ `live-clip` (id 156, สร้าง 26 ต.ค. 2026) แบบ git-backed ชี้รีโปนี้ compose path = `docker-compose.portainer.yml`
+   env ของ stack มาจากไฟล์ `.env.portainer` บนเครื่องนัท (ไม่ขึ้น git, มี `IMAGE_TAG=sha-<commit>`, รหัสทุกตัว,
+   `SRT_PUBLIC_HOST=thestandard.fortiddns.com`, `MIN_FREE_GB=200`, `CUT_WORKERS=1` และค่า S3 ถ้ามี)
+   สร้าง/ปรับด้วย `python3 scripts/portainer_stack.py create|redeploy <tag>|status|logs` สคริปต์เช็กว่าคอนเทนเนอร์รันแท็กที่ขอจริง
 3. **เว็บไม่เปิดพอร์ตบนโฮสต์** NPM อยู่บนเครือข่าย `management_default` เดียวกัน ให้เพิ่ม Proxy Host ใน NPM
    ชี้ไปที่ `live-clip-web` พอร์ต `8080` พร้อม Let's Encrypt
    ก่อนมีโดเมน ถ้าจะลองจากในออฟฟิศ ตั้ง `WEB_BIND` เป็น IP ของ NAS ชั่วคราว แล้วเข้าทาง `http://<NAS>:8089` ลบออกเมื่อมี HTTPS แล้ว
 4. **IT ต้อง forward UDP 8890** จาก FortiGate มาที่ NAS พอร์ตเดียวนี้คือทางเข้าของสัญญาณทั้งหมด
-5. **deploy รอบถัดไป** = push ขึ้น main รอ CI เสร็จ แล้วแก้ `IMAGE_TAG` ใน stack env เป็น sha ใหม่ กด Pull and redeploy
-   เหมือน probook ทุกอย่าง รวมถึงกับดักที่ redeploy โดยไม่เปลี่ยน IMAGE_TAG จะไม่ได้ของใหม่
+5. **deploy รอบถัดไป** = push ขึ้น main รอ CI เสร็จ (`gh run watch`) แล้ว `python3 scripts/portainer_stack.py redeploy sha-<commit>`
+   คำสั่งนี้ส่ง env จาก `.env.portainer` ไปด้วยทุกครั้ง จึงใช้เปลี่ยนรหัสหรือเปิด Wasabi ได้ด้วย
+   กับดักเดียวกับ probook คือ redeploy โดยไม่เปลี่ยน IMAGE_TAG จะได้อิมเมจเดิม
+6. **ทดสอบว่าพอร์ตเปิดถึงแล้ว** รัน `test/probe_prod.sh` จากเครื่องไหนก็ได้ที่มี Docker แล้วดู `logs mediamtx`
+   ต้องเห็น `publishing to path 'probe1'` ถ้าขึ้น I/O error แปลว่า UDP 8890 ยังมาไม่ถึง NAS (26 ต.ค. ยังไม่ถึง)
 
 ยังไม่ตั้ง Wasabi ก็ขึ้นได้ ระบบจะเก็บคลิปไว้บน NAS อย่างเดียว ใส่ค่า S3 ทั้งสี่ตัวแล้ว redeploy เมื่อไหร่ก็เปลี่ยนเป็น Wasabi
 

@@ -2,7 +2,7 @@
 """Create / redeploy / inspect the live-clip stack on Portainer (git-backed stack).
 
     python3 scripts/portainer_stack.py create            # from .env.portainer
-    python3 scripts/portainer_stack.py redeploy sha-abc1234
+    python3 scripts/portainer_stack.py redeploy sha-abc1234   # env synced from .env.portainer
     python3 scripts/portainer_stack.py status
     python3 scripts/portainer_stack.py logs [mediamtx|web] [N]
 
@@ -90,8 +90,11 @@ def cmd_create():
 
 
 def cmd_redeploy(tag):
+    """Redeploy with IMAGE_TAG=tag. Env comes from .env.portainer when that file exists (the
+    single source of truth on the ops machine), otherwise the stack's current env is kept."""
     s = find_stack() or sys.exit('stack not found')
-    env = {e['name']: e['value'] for e in s.get('Env') or []}
+    env = read_env('.env.portainer') if os.path.exists('.env.portainer') else \
+        {e['name']: e['value'] for e in s.get('Env') or []}
     env['IMAGE_TAG'] = tag
     body = {'env': [{'name': k, 'value': v} for k, v in env.items()], 'prune': False, 'pullImage': True,
             'repositoryReferenceName': 'refs/heads/main', 'repositoryAuthentication': False}
