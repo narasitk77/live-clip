@@ -1,0 +1,4 @@
+.env
+wirecast-today.txt
+wirecast-prod.txt
+__pycache__/

@@ -1,0 +1,54 @@
+# live-clip, LOCAL / dev: builds both images from this folder. Values come from ./.env
+# (copy .env.example). Production runs docker-compose.portainer.yml with prebuilt images.
+x-logging: &logging
+  driver: json-file
+  options: { max-size: "10m", max-file: "3" }
+
+services:
+  mediamtx:
+    build: ./mediamtx
+    image: live-clip-mediamtx:dev
+    restart: always
+    init: true   # MediaMTX is not an init: without this, finished hook processes pile up as zombies
+    logging: *logging
+    environment:
+      MTX_PATHDEFAULTS_SRTPUBLISHPASSPHRASE: ${SRT_PASSPHRASE:?set SRT_PASSPHRASE (10-79 chars)}
+      MTX_AUTHINTERNALUSERS_2_PASS: ${MEDIAMTX_API_PASS:?set MEDIAMTX_API_PASS}
+      RECONNECT_MIN: ${RECONNECT_MIN:-10}
+    ports:
+      - "${SRT_PORT:-8890}:8890/udp"
+    volumes:
+      - data:/data
+
+  web:
+    build: .
+    image: live-clip-web:dev
+    restart: always
+    depends_on: [mediamtx]
+    logging: *logging
+    environment:
+      MEDIAMTX_API: http://mediamtx:9997
+      MEDIAMTX_API_PASS: ${MEDIAMTX_API_PASS}
+      WEB_USER: ${WEB_USER}
+      WEB_PASSWORD: ${WEB_PASSWORD}
+      SRT_PASSPHRASE: ${SRT_PASSPHRASE}
+      SRT_PUBLIC_HOST: ${SRT_PUBLIC_HOST}
+      SRT_PUBLIC_PORT: ${SRT_PUBLIC_PORT:-8890}
+      RECONNECT_MIN: ${RECONNECT_MIN:-10}
+      S3_ENDPOINT: ${S3_ENDPOINT}
+      S3_REGION: ${S3_REGION}
+      S3_BUCKET: ${S3_BUCKET}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+      S3_SECRET_KEY: ${S3_SECRET_KEY}
+      S3_PREFIX: ${S3_PREFIX:-live-clips}
+      MIN_FREE_GB: ${MIN_FREE_GB:-20}
+      LOCAL_CLIP_HOURS: ${LOCAL_CLIP_HOURS:-24}
+      CUT_WORKERS: ${CUT_WORKERS:-2}
+    ports:
+      # loopback only by default: reach it through an HTTPS reverse proxy
+      - "${WEB_BIND:-127.0.0.1}:${WEB_PORT:-8080}:8080"
+    volumes:
+      - data:/data
+
+volumes:
+  data:

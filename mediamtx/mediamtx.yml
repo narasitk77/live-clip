@@ -1,0 +1,51 @@
+# MediaMTX for live-clip: SRT in, nothing else exposed.
+# Secrets come from env (see docker-compose.yml): MTX_PATHDEFAULTS_SRTPUBLISHPASSPHRASE.
+logLevel: info
+
+rtsp: no
+rtmp: no
+hls: no
+webrtc: no
+playback: no
+metrics: no
+pprof: no
+moq: no
+
+srt: yes
+srtAddress: :8890
+
+# Control API: reachable only on the docker network (port 9997 is never published).
+api: yes
+apiAddress: :9997
+
+authMethod: internal
+authInternalUsers:
+  # Encoders on the internet may publish; every path still demands the SRT passphrase below.
+  - user: any
+    pass:
+    ips: []
+    permissions:
+      - action: publish
+  # dvr.sh runs inside this container and reads the stream back.
+  - user: any
+    pass:
+    ips: ['127.0.0.1', '::1']
+    permissions:
+      - action: read
+  # The web app. docker-compose.yml replaces this password with MEDIAMTX_API_PASS through
+  # MTX_AUTHINTERNALUSERS_2_PASS and refuses to start without it.
+  - user: liveclip
+    pass: set-from-env-MTX_AUTHINTERNALUSERS_2_PASS
+    ips: []
+    permissions:
+      - action: api
+
+pathDefaults:
+  srtPublishPassphrase:
+  # Started when a stream becomes available, stopped with SIGINT when it goes away.
+  runOnAvailable: /dvr.sh
+  runOnAvailableRestart: yes
+
+paths:
+  # Stream names become folder names: lowercase letters, digits, - and _ only.
+  '~^[a-z0-9_-]{1,32}$':

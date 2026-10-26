@@ -1,0 +1,375 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Live Clip</title>
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1.7.3/dist/hls.min.js"></script>
+<style>
+  :root { --bg:#111418; --panel:#1a1f26; --line:#2a313b; --text:#e6e9ee; --dim:#8b95a3;
+          --accent:#4f9dff; --live:#ff4d4f; --ok:#3ecf8e; --warn:#f5a524; --in:#3ecf8e; --out:#ff7a45; }
+  * { box-sizing:border-box }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.45 system-ui, "Sukhumvit Set", "Noto Sans Thai", sans-serif }
+  header { display:flex; gap:12px; align-items:center; padding:10px 16px; border-bottom:1px solid var(--line); flex-wrap:wrap }
+  header h1 { font-size:16px; margin:0 }
+  .chip { padding:2px 8px; border-radius:99px; background:var(--panel); border:1px solid var(--line); color:var(--dim); font-size:12px }
+  #warnings div { background:#3a2a10; color:#ffd58a; padding:8px 16px; border-bottom:1px solid #5a4318 }
+  main { display:grid; grid-template-columns:260px 1fr; gap:0; min-height:calc(100vh - 50px) }
+  aside { border-right:1px solid var(--line); padding:12px; overflow:auto }
+  section.main { padding:12px 16px; min-width:0 }
+  @media (max-width: 800px) { main { grid-template-columns:1fr } aside { border-right:0; border-bottom:1px solid var(--line) } }
+  .stream { margin-bottom:14px }
+  .stream h3 { margin:0 0 6px; font-size:14px; display:flex; gap:6px; align-items:center }
+  .dot { width:8px; height:8px; border-radius:50%; background:var(--line); display:inline-block }
+  .dot.on { background:var(--ok) } .dot.live { background:var(--live) }
+  .sess { display:block; width:100%; text-align:left; background:var(--panel); border:1px solid var(--line); color:var(--text);
+          padding:6px 8px; border-radius:6px; margin:4px 0; cursor:pointer; font:inherit }
+  .sess.sel { border-color:var(--accent) } .sess small { color:var(--dim); display:block }
+  .live-badge { color:#fff; background:var(--live); border-radius:4px; padding:0 5px; font-size:11px; font-weight:600 }
+  video { width:100%; max-height:60vh; background:#000; border-radius:6px; display:block }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:8px 0 }
+  button, input, select { font:inherit; color:var(--text); background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:5px 10px }
+  button { cursor:pointer } button:hover { border-color:var(--accent) } button:disabled { opacity:.45; cursor:default }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#fff; font-weight:600 }
+  input[type=number] { width:80px } input.name { flex:1; min-width:180px }
+  .clock { font-variant-numeric:tabular-nums; font-size:18px; font-weight:600 }
+  .dim { color:var(--dim) }
+  .bar { position:relative; height:34px; margin:6px 0 }
+  .bar input[type=range] { width:100%; margin:0; position:absolute; top:10px; padding:0 }
+  .mark { position:absolute; top:0; width:3px; height:34px; pointer-events:none; border-radius:2px }
+  .mark.in { background:var(--in) } .mark.out { background:var(--out) }
+  .range { position:absolute; top:14px; height:6px; background:rgba(79,157,255,.35); pointer-events:none; border-radius:3px }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:10px 12px; margin:10px 0 }
+  .pt { display:flex; gap:6px; align-items:center; flex-wrap:wrap }
+  .pt b { width:36px } .pt .t { font-variant-numeric:tabular-nums; min-width:110px; font-weight:600 }
+  table { width:100%; border-collapse:collapse } td, th { text-align:left; padding:6px; border-bottom:1px solid var(--line); vertical-align:top }
+  th { color:var(--dim); font-weight:500; font-size:12px }
+  .st-done { color:var(--ok) } .st-failed { color:var(--live) } .st-run { color:var(--warn) }
+  .err { color:#ff9c9c; font-size:12px; white-space:pre-wrap }
+  details summary { cursor:pointer; color:var(--dim) }
+  code { background:#0b0d10; padding:1px 5px; border-radius:4px }
+  kbd { border:1px solid var(--line); border-bottom-width:2px; border-radius:4px; padding:0 4px; font-size:12px }
+  #playerMsg { color:#ff9c9c }
+</style>
+</head>
+<body>
+<header>
+  <h1>Live Clip</h1>
+  <span class="chip" id="storage"></span>
+  <span class="chip" id="disk"></span>
+  <span class="chip" id="buffer"></span>
+</header>
+<div id="warnings"></div>
+<main>
+  <aside>
+    <div id="streams"><p class="dim">กำลังโหลด…</p></div>
+    <details class="card">
+      <summary>ตั้งค่าบัฟเฟอร์</summary>
+      <div class="row">ย้อนดูได้ <input type="number" id="bufMin" min="1" max="720"> นาที</div>
+      <div class="row">เก็บหลังจบไลฟ์ <input type="number" id="keepH" min="1" max="168"> ชั่วโมง</div>
+      <div class="row"><button id="saveSettings">บันทึก</button> <span id="settingsMsg" class="dim"></span></div>
+      <p class="dim">เปลี่ยนความยาวบัฟเฟอร์ระหว่างไลฟ์ ระบบจะเริ่มตัวบันทึกใหม่ ภาพช่วงนั้นขาดไม่กี่วินาที</p>
+    </details>
+    <details class="card">
+      <summary>วิธีส่งสัญญาณจาก vMix / Wirecast</summary>
+      <div id="srtHelp" class="dim"></div>
+    </details>
+  </aside>
+  <section class="main">
+    <div class="row"><span id="nowPlaying" class="dim">เลือกสัญญาณทางซ้าย</span> <span id="playerMsg"></span></div>
+    <video id="v" muted playsinline></video>
+    <div class="bar" id="bar">
+      <div class="range" id="selRange" hidden></div>
+      <div class="mark in" id="mkIn" hidden></div><div class="mark out" id="mkOut" hidden></div>
+      <input type="range" id="scrub" min="0" max="1" step="0.1" value="0">
+    </div>
+    <div class="row">
+      <span class="clock" id="clock">--:--:--.-</span>
+      <span class="dim" id="behind"></span>
+      <span class="dim" id="window"></span>
+    </div>
+    <div class="row">
+      <button data-skip="-10">−10s</button><button data-skip="-1">−1s</button>
+      <button id="play">เล่น/หยุด</button>
+      <button data-skip="1">+1s</button><button data-skip="10">+10s</button>
+      <button id="toLive">ไปที่สด</button>
+      <span class="dim">ดูช้ากว่าสด</span><input type="number" id="delay" min="0" value="30"><span class="dim">วินาที</span>
+      <button id="applyDelay">ไป</button>
+      <button id="mute">เสียง</button>
+    </div>
+    <div class="card">
+      <div class="pt"><b style="color:var(--in)">In</b><span class="t" id="tIn">ยังไม่ตั้ง</span>
+        <button data-nudge="in" data-d="-1">−1s</button><button data-nudge="in" data-d="-0.1">−0.1</button>
+        <button data-nudge="in" data-d="0.1">+0.1</button><button data-nudge="in" data-d="1">+1s</button>
+        <button id="setIn">ตั้งจากตำแหน่งนี้ <kbd>I</kbd></button><button data-goto="in">ไปดู</button></div>
+      <div class="pt" style="margin-top:6px"><b style="color:var(--out)">Out</b><span class="t" id="tOut">ยังไม่ตั้ง</span>
+        <button data-nudge="out" data-d="-1">−1s</button><button data-nudge="out" data-d="-0.1">−0.1</button>
+        <button data-nudge="out" data-d="0.1">+0.1</button><button data-nudge="out" data-d="1">+1s</button>
+        <button id="setOut">ตั้งจากตำแหน่งนี้ <kbd>O</kbd></button><button data-goto="out">ไปดู</button></div>
+      <div class="row">
+        <span>ยาว <b id="clipLen">-</b></span>
+        <input class="name" id="clipName" placeholder="ชื่อคลิป เช่น สัมภาษณ์ช่วงแรก">
+        <select id="mode">
+          <option value="fast">เร็ว: ไม่เข้ารหัสใหม่ (อาจเริ่มก่อน In ไม่เกิน ~2 วิ)</option>
+          <option value="accurate">ตรงเฟรม: เข้ารหัสใหม่ ช้ากว่า</option>
+        </select>
+        <button class="primary" id="makeClip">สร้างคลิป</button>
+      </div>
+      <div id="clipMsg" class="err"></div>
+      <p class="dim" style="margin:4px 0 0">ปุ่มลัด <kbd>Space</kbd> เล่น/หยุด · <kbd>←</kbd><kbd>→</kbd> ±1 วินาที · <kbd>I</kbd> <kbd>O</kbd> ตั้งจุด · <kbd>L</kbd> ไปที่สด</p>
+    </div>
+    <h3>คลิป</h3>
+    <table><thead><tr><th>ชื่อ</th><th>ช่วงเวลา</th><th>ยาว</th><th>สถานะ</th><th></th></tr></thead><tbody id="clips"></tbody></table>
+  </section>
+</main>
+<script>
+'use strict';
+const $ = (id) => document.getElementById(id);
+const v = $('v');
+const TZ = 'Asia/Bangkok';
+// absolute URLs: if the page was opened as http://user:pass@host/, relative fetches inherit
+// the credentials and the browser refuses them; location.origin never carries them.
+const ORIGIN = location.origin;
+const fmtT = new Intl.DateTimeFormat('en-GB', { timeZone: TZ, hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+const fmtD = new Intl.DateTimeFormat('th-TH-u-ca-gregory', { timeZone: TZ, day: 'numeric', month: 'short' });
+const tenth = (ms) => Math.floor((((ms % 1000) + 1000) % 1000) / 100);
+const clock = (ms) => ms == null ? '--:--:--.-' : `${fmtT.format(ms)}.${tenth(ms)}`;
+const hm = (ms) => fmtT.format(ms).slice(0, 5);
+const dur = (s) => { s = Math.max(0, Math.round(s)); const h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60, x = s % 60;
+  return (h ? h + ':' + String(m).padStart(2, '0') : m) + ':' + String(x).padStart(2, '0'); };
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+let state = null, hls = null, cur = null; // cur = {stream, session, live}
+let inMs = null, outMs = null, scrubbing = false;
+
+async function api(path, body) {
+  const r = await fetch(ORIGIN + path, body === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  // a body that doesn't parse is an error, never "no data" (it would read as an empty list)
+  const data = await r.json().catch(() => { throw new Error(`HTTP ${r.status}: อ่านคำตอบจากเซิร์ฟเวอร์ไม่ได้`); });
+  if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+  return data;
+}
+
+// ---- time mapping: media time <-> wall clock, from the fragments' PROGRAM-DATE-TIME ----
+function frags() {
+  if (!hls || !hls.levels || !hls.levels.length) return [];
+  const lvl = hls.levels[Math.max(0, hls.currentLevel)];
+  return (lvl && lvl.details && lvl.details.fragments) || [];
+}
+function mediaToMs(t) {
+  const fs = frags(); if (!fs.length) return null;
+  let f = fs[0];
+  for (const x of fs) { if (x.start <= t) f = x; else break; }
+  if (f.programDateTime == null) return null;
+  return f.programDateTime + (t - f.start) * 1000;
+}
+function msToMedia(ms) {
+  const fs = frags(); if (!fs.length) return null;
+  let f = fs[0];
+  for (const x of fs) { if (x.programDateTime != null && x.programDateTime <= ms) f = x; else if (x.programDateTime > ms) break; }
+  return f.start + Math.min(f.duration, Math.max(0, (ms - f.programDateTime) / 1000));
+}
+// Window = what is still in the playlist. video.seekable starts at 0 even after the oldest
+// segments have rolled out of the buffer, so it can't be used for the scrub bar.
+function seekRange() {
+  const fs = frags();
+  if (fs.length) { const l = fs[fs.length - 1]; return [fs[0].start, l.start + l.duration]; }
+  if (!v.seekable.length) return null;
+  return [v.seekable.start(0), v.seekable.end(v.seekable.length - 1)];
+}
+function seekTo(t) { const r = seekRange(); if (!r) return; v.currentTime = Math.min(Math.max(t, r[0]), r[1] - 0.2); }
+
+// ---- player ----
+function load(stream, session, live, keepMs) {
+  cur = { stream, session, live };
+  $('playerMsg').textContent = '';
+  $('nowPlaying').innerHTML = `<b>${esc(stream)}</b> · รอบ ${esc(session)} ${live ? '<span class="live-badge">LIVE</span>' : '<span class="dim">จบแล้ว</span>'}`;
+  if (hls) hls.destroy();
+  if (!window.Hls || !Hls.isSupported()) { $('playerMsg').textContent = 'เบราว์เซอร์นี้เล่น HLS ไม่ได้ ใช้ Chrome/Edge/Firefox/Safari รุ่นใหม่'; return; }
+  hls = new Hls({ liveSyncDurationCount: 3, maxBufferLength: 30, backBufferLength: 90 });
+  hls.on(Hls.Events.ERROR, (_, d) => {
+    if (!d.fatal) return;
+    $('playerMsg').textContent = `เล่นไม่ได้: ${d.type} / ${d.details}`;
+    if (d.type === Hls.ErrorTypes.NETWORK_ERROR) setTimeout(() => hls && hls.startLoad(), 2000);
+    else if (d.type === Hls.ErrorTypes.MEDIA_ERROR) hls.recoverMediaError();
+  });
+  hls.once(Hls.Events.LEVEL_LOADED, () => {
+    $('playerMsg').textContent = '';
+    if (keepMs != null) { const t = msToMedia(keepMs); if (t != null) setTimeout(() => seekTo(t), 300); }
+    else if (!live) seekTo(0);
+  });
+  hls.loadSource(`${ORIGIN}/hls/${encodeURIComponent(stream)}/${encodeURIComponent(session)}/index.m3u8`);
+  hls.attachMedia(v);
+  v.play().catch(() => {});
+  renderStreams();
+}
+function nowMs() { return mediaToMs(v.currentTime); }
+
+function tick() {
+  const r = seekRange(), s = $('scrub');
+  const ms = nowMs();
+  $('clock').textContent = clock(ms);
+  if (r) {
+    s.min = r[0]; s.max = r[1];
+    if (!scrubbing) s.value = v.currentTime;
+    const edge = mediaToMs(r[1]), start = mediaToMs(r[0]);
+    $('behind').textContent = cur && cur.live && edge && ms ? `ช้ากว่าสด ${Math.max(0, (edge - ms) / 1000).toFixed(0)} วิ` : '';
+    $('window').textContent = start && edge ? `บัฟเฟอร์ ${hm(start)}–${hm(edge)} (${dur((edge - start) / 1000)})` : '';
+  }
+  drawMarks();
+  requestAnimationFrame(tick);
+}
+function drawMarks() {
+  const r = seekRange(), w = $('bar').clientWidth;
+  const pos = (ms) => { if (ms == null || !r) return null; const t = msToMedia(ms); if (t == null) return null;
+    return Math.min(1, Math.max(0, (t - r[0]) / ((r[1] - r[0]) || 1))) * w; };
+  const pi = pos(inMs), po = pos(outMs);
+  $('mkIn').hidden = pi == null; if (pi != null) $('mkIn').style.left = pi + 'px';
+  $('mkOut').hidden = po == null; if (po != null) $('mkOut').style.left = po + 'px';
+  const sel = $('selRange'); sel.hidden = pi == null || po == null || po <= pi;
+  if (!sel.hidden) { sel.style.left = pi + 'px'; sel.style.width = (po - pi) + 'px'; }
+}
+$('scrub').addEventListener('input', (e) => { scrubbing = true; seekTo(+e.target.value); });
+$('scrub').addEventListener('change', () => { scrubbing = false; });
+document.querySelectorAll('[data-skip]').forEach((b) => b.onclick = () => seekTo(v.currentTime + +b.dataset.skip));
+$('play').onclick = () => (v.paused ? v.play() : v.pause());
+$('mute').onclick = () => { v.muted = !v.muted; $('mute').textContent = v.muted ? 'เสียง' : 'ปิดเสียง'; };
+$('toLive').onclick = () => { if (hls && hls.liveSyncPosition) seekTo(hls.liveSyncPosition); else { const r = seekRange(); r && seekTo(r[1]); } v.play(); };
+$('applyDelay').onclick = () => { const r = seekRange(); if (!r) return; seekTo(r[1] - Math.max(0, +$('delay').value || 0)); v.play(); };
+
+// ---- in / out ----
+function renderPoints() {
+  $('tIn').textContent = inMs == null ? 'ยังไม่ตั้ง' : clock(inMs);
+  $('tOut').textContent = outMs == null ? 'ยังไม่ตั้ง' : clock(outMs);
+  $('clipLen').textContent = inMs != null && outMs != null ? (outMs > inMs ? dur((outMs - inMs) / 1000) : 'Out อยู่ก่อน In') : '-';
+}
+function setPoint(which) {
+  const ms = nowMs(); if (ms == null) return;
+  if (which === 'in') inMs = ms; else outMs = ms;
+  renderPoints();
+}
+$('setIn').onclick = () => setPoint('in');
+$('setOut').onclick = () => setPoint('out');
+document.querySelectorAll('[data-nudge]').forEach((b) => b.onclick = () => {
+  const d = +b.dataset.d * 1000;
+  if (b.dataset.nudge === 'in' && inMs != null) inMs += d;
+  if (b.dataset.nudge === 'out' && outMs != null) outMs += d;
+  renderPoints();
+});
+document.querySelectorAll('[data-goto]').forEach((b) => b.onclick = () => {
+  const ms = b.dataset.goto === 'in' ? inMs : outMs; if (ms == null) return;
+  const t = msToMedia(ms); if (t != null) { seekTo(t); v.pause(); }
+});
+$('makeClip').onclick = async () => {
+  const msg = $('clipMsg'); msg.textContent = '';
+  if (!cur) return (msg.textContent = 'เลือกสัญญาณก่อน');
+  if (inMs == null || outMs == null) return (msg.textContent = 'ตั้งจุด In และ Out ก่อน');
+  $('makeClip').disabled = true;
+  try {
+    await api('/api/clips', { stream: cur.stream, session: cur.session, t_in: inMs / 1000, t_out: outMs / 1000,
+      name: $('clipName').value.trim(), accurate: $('mode').value === 'accurate' });
+    $('clipName').value = ''; inMs = outMs = null; renderPoints();
+    loadClips();
+  } catch (e) { msg.textContent = e.message; }
+  finally { $('makeClip').disabled = false; }
+};
+document.addEventListener('keydown', (e) => {
+  if (['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName) || e.metaKey || e.ctrlKey || e.altKey) return;
+  const k = e.key.toLowerCase();
+  if (k === 'i') setPoint('in'); else if (k === 'o') setPoint('out');
+  else if (k === 'l') $('toLive').click();
+  else if (k === ' ') { e.preventDefault(); $('play').click(); }
+  else if (e.key === 'ArrowLeft') seekTo(v.currentTime - 1); else if (e.key === 'ArrowRight') seekTo(v.currentTime + 1);
+});
+
+// ---- streams / state ----
+function renderStreams() {
+  if (!state) return;
+  const box = $('streams');
+  if (!state.streams.length) { box.innerHTML = '<p class="dim">ยังไม่มีสัญญาณเข้ามา</p>'; return; }
+  box.innerHTML = state.streams.map((s) => `
+    <div class="stream"><h3>
+      <span class="dot ${s.receiving ? 'on' : ''}" title="รับสัญญาณ"></span>
+      <span class="dot ${s.recording ? 'live' : ''}" title="บันทึกบัฟเฟอร์"></span>
+      ${esc(s.name)} <small class="dim">${s.kbps ? (s.kbps / 1000).toFixed(1) + ' Mbps' : ''}</small></h3>
+      ${s.sessions.map((x) => `<button class="sess ${cur && cur.stream === s.name && cur.session === x.id ? 'sel' : ''}"
+          data-s="${esc(s.name)}" data-id="${esc(x.id)}" data-live="${x.live ? 1 : ''}">
+          ${x.live ? '<span class="live-badge">LIVE</span> ' : ''}${x.first ? fmtD.format(x.first * 1000) + ' ' + hm(x.first * 1000) : ''}–${x.last ? hm(x.last * 1000) : ''}
+          <small>${x.first && x.last ? 'มีภาพ ' + dur(x.last - x.first) : 'ยังไม่มีภาพ'}${x.expires_at ? ' · ลบอัตโนมัติ ' + fmtD.format(x.expires_at * 1000) + ' ' + hm(x.expires_at * 1000) : ''}</small>
+        </button>`).join('') || '<p class="dim">รอภาพชุดแรก…</p>'}
+    </div>`).join('');
+  box.querySelectorAll('.sess').forEach((b) => b.onclick = () => load(b.dataset.s, b.dataset.id, !!b.dataset.live));
+}
+async function loadState() {
+  try { state = await api('/api/state'); }
+  catch (e) { $('warnings').innerHTML = `<div>ติดต่อเซิร์ฟเวอร์ไม่ได้: ${esc(e.message)}</div>`; return; }
+  $('warnings').innerHTML = state.warnings.map((w) => `<div>${esc(w)}</div>`).join('');
+  $('storage').textContent = state.storage === 'wasabi' ? 'เก็บคลิปที่ Wasabi' : 'เก็บคลิปในเครื่องเท่านั้น';
+  $('disk').textContent = `ดิสก์ว่าง ${state.disk.free_gb} / ${state.disk.total_gb} GB`;
+  $('buffer').textContent = `ย้อนได้ ${state.settings.buffer_minutes} นาที · เก็บ ${state.settings.keep_hours} ชม.หลังจบ`;
+  if (document.activeElement !== $('bufMin')) $('bufMin').value = state.settings.buffer_minutes;
+  if (document.activeElement !== $('keepH')) $('keepH').value = state.settings.keep_hours;
+  const host = state.srt.host || '<ที่อยู่เซิร์ฟเวอร์>';
+  $('srtHelp').innerHTML = `<p>ตั้งเป็นโหมด <b>Caller</b> ส่งไปที่ <code>${esc(host)}</code> พอร์ต <code>${esc(state.srt.port)}</code></p>
+    <p>Stream ID: <code>publish:ชื่อสัญญาณ</code> เช่น <code>publish:cam1</code> (ตัวเล็ก ตัวเลข - _ ไม่เกิน 32 ตัว)</p>
+    <p>Passphrase: ใส่รหัสที่ทีมเทคนิคให้ · Key length 128 ขึ้นไป · Latency แนะนำ 1000–2000 ms</p>
+    <p>วิดีโอ H.264 + เสียง AAC ราว 10 Mbps · Keyframe ทุก 1–2 วินาที</p>`;
+  if (cur) {  // stream went live again (encoder reconnected) or ended: reload, keep the position
+    const s = state.streams.find((x) => x.name === cur.stream);
+    const sess = s && s.sessions.find((x) => x.id === cur.session);
+    if (!sess) {  // expired or removed by the disk guard: stop retrying a playlist that is gone
+      if (hls) { hls.destroy(); hls = null; }
+      cur = null;
+      $('playerMsg').textContent = 'รอบที่เปิดอยู่ถูกลบออกจากบัฟเฟอร์แล้ว เลือกรอบอื่นทางซ้าย';
+    }
+    else if (sess.live !== cur.live) load(cur.stream, cur.session, sess.live, nowMs());  // keep the editor's position
+  }
+  renderStreams();
+}
+$('saveSettings').onclick = async () => {
+  $('settingsMsg').textContent = '';
+  try {
+    await api('/api/settings', { buffer_minutes: Math.round(+$('bufMin').value), keep_hours: Math.round(+$('keepH').value) });
+    $('settingsMsg').textContent = 'บันทึกแล้ว'; loadState();
+  } catch (e) { $('settingsMsg').textContent = e.message; }
+};
+
+// ---- clips ----
+const STATUS = { queued: 'รอคิว', cutting: 'กำลังตัด', uploading: 'กำลังอัปขึ้น Wasabi', done: 'พร้อม', failed: 'ล้มเหลว' };
+let clipTimer = null;
+async function loadClips() {
+  clearTimeout(clipTimer);
+  let clips = null;
+  try { clips = await api('/api/clips'); renderClips(clips); }
+  catch (e) { $('clips').innerHTML = `<tr><td colspan="5" class="err">โหลดรายการคลิปไม่ได้: ${esc(e.message)}</td></tr>`; }
+  finally {  // keep polling whatever happened
+    const busy = clips && clips.some((c) => ['queued', 'cutting', 'uploading'].includes(c.status));
+    clipTimer = setTimeout(loadClips, !clips ? 5000 : busy ? 2000 : 10000);
+  }
+}
+function renderClips(clips) {
+  $('clips').innerHTML = clips.map((c) => {
+    const busy = ['queued', 'cutting', 'uploading'].includes(c.status);
+    const cls = c.status === 'done' ? 'st-done' : c.status === 'failed' ? 'st-failed' : 'st-run';
+    const canDl = c.local || (c.s3_key && c.status === 'done');
+    const where = c.status === 'done' ? (c.s3_key ? 'Wasabi' : 'ในเครื่อง') : (c.local ? 'โหลดจากในเครื่องได้แล้ว' : '');
+    return `<tr><td>${esc(c.name)}<br><small class="dim">${esc(c.stream)}</small></td>
+      <td>${c.t_in ? clock(c.t_in * 1000) + '–' + clock(c.t_out * 1000) : ''}</td>
+      <td>${c.duration ? dur(c.duration) : c.t_in ? dur(c.t_out - c.t_in) : ''}${c.gap > 0.5 ? `<br><small class="err">สัญญาณขาด ${c.gap} วิ</small>` : ''}${c.preroll > 0.05 ? `<br><small class="dim">เริ่มก่อน In ${c.preroll} วิ</small>` : ''}</td>
+      <td class="${cls}">${STATUS[c.status] || esc(c.status)}${where ? `<br><small class="dim">${where}</small>` : ''}${c.error ? `<div class="err">${esc(c.error)}</div>` : ''}</td>
+      <td>${canDl ? `<a href="/clips/${esc(c.id)}/download"><button>ดาวน์โหลด</button></a>` : ''}
+          ${c.status === 'failed' ? `<button data-retry="${esc(c.id)}">ลองใหม่</button>` : ''}${busy ? '…' : ''}</td></tr>`;
+  }).join('') || '<tr><td colspan="5" class="dim">ยังไม่มีคลิป</td></tr>';
+  $('clips').querySelectorAll('[data-retry]').forEach((b) => b.onclick = async () => {
+    try { await api(`/api/clips/${b.dataset.retry}/retry`, {}); } catch (e) { alert(e.message); }
+    loadClips();
+  });
+}
+
+renderPoints();
+loadState(); setInterval(loadState, 4000);
+loadClips();
+requestAnimationFrame(tick);
+</script>
+</body>
+</html>

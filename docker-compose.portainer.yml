@@ -1,0 +1,67 @@
+# live-clip on the Portainer host (git-backed stack, compose path = this file).
+# Images are built by GitHub Actions (.github/workflows/docker-build.yml). Pin IMAGE_TAG to a
+# sha-<commit> tag in the stack env, as production-booking does; "latest" is only the fallback.
+# Required stack env: SRT_PASSPHRASE, MEDIAMTX_API_PASS, WEB_USER, WEB_PASSWORD, SRT_PUBLIC_HOST.
+x-logging: &logging
+  driver: json-file
+  options: { max-size: "10m", max-file: "3" }
+
+services:
+  mediamtx:
+    image: ghcr.io/narasitk77/live-clip-mediamtx:${IMAGE_TAG:-latest}
+    container_name: live-clip-mediamtx
+    restart: always
+    init: true
+    logging: *logging
+    environment:
+      MTX_PATHDEFAULTS_SRTPUBLISHPASSPHRASE: ${SRT_PASSPHRASE:?set SRT_PASSPHRASE (10-79 chars)}
+      MTX_AUTHINTERNALUSERS_2_PASS: ${MEDIAMTX_API_PASS:?set MEDIAMTX_API_PASS}
+      RECONNECT_MIN: ${RECONNECT_MIN:-10}
+    ports:
+      - "${SRT_PORT:-8890}:8890/udp"   # the only port the internet needs: forward UDP 8890 here
+    volumes:
+      - data:/data
+
+  web:
+    image: ghcr.io/narasitk77/live-clip-web:${IMAGE_TAG:-latest}
+    container_name: live-clip-web
+    restart: always
+    depends_on: [mediamtx]
+    logging: *logging
+    environment:
+      MEDIAMTX_API: http://mediamtx:9997
+      MEDIAMTX_API_PASS: ${MEDIAMTX_API_PASS}
+      WEB_USER: ${WEB_USER}
+      WEB_PASSWORD: ${WEB_PASSWORD}
+      SRT_PASSPHRASE: ${SRT_PASSPHRASE}
+      SRT_PUBLIC_HOST: ${SRT_PUBLIC_HOST}
+      SRT_PUBLIC_PORT: ${SRT_PUBLIC_PORT:-8890}
+      RECONNECT_MIN: ${RECONNECT_MIN:-10}
+      S3_ENDPOINT: ${S3_ENDPOINT}
+      S3_REGION: ${S3_REGION}
+      S3_BUCKET: ${S3_BUCKET}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+      S3_SECRET_KEY: ${S3_SECRET_KEY}
+      S3_PREFIX: ${S3_PREFIX:-live-clips}
+      MIN_FREE_GB: ${MIN_FREE_GB:-20}
+      LOCAL_CLIP_HOURS: ${LOCAL_CLIP_HOURS:-24}
+      CUT_WORKERS: ${CUT_WORKERS:-2}
+    ports:
+      # Nginx Proxy Manager reaches this container by name over npm-network, so no host port is
+      # needed. 127.0.0.1 here = only the NAS itself. Set WEB_BIND to the NAS LAN IP ONLY for a
+      # short LAN test before the HTTPS proxy host exists (basic-auth over plain HTTP).
+      - "${WEB_BIND:-127.0.0.1}:${WEB_PORT:-8089}:8080"
+    volumes:
+      - data:/data
+    networks:
+      - default
+      - npm-network
+
+volumes:
+  data:
+
+networks:
+  # Existing external network shared with Nginx Proxy Manager (management stack), like probook.
+  npm-network:
+    external: true
+    name: management_default
