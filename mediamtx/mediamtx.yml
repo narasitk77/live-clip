@@ -1,6 +1,8 @@
 # MediaMTX for live-clip: SRT in, nothing else exposed.
 # Secrets come from env (see docker-compose.yml): MTX_PATHDEFAULTS_SRTPUBLISHPASSPHRASE.
 logLevel: info
+# Never set udpReadBufferSize above the host's net.core.rmem_max (212992 on Docker Desktop and
+# most NAS kernels): MediaMTX then refuses to open the SRT listener at all (reproduced 26 Oct).
 
 rtsp: no
 rtmp: no

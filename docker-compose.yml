@@ -20,6 +20,30 @@ services:
     volumes:
       - data:/data
 
+  # Wirecast cannot set SRT latency and MediaMTX cannot raise it on the receiving side, so a
+  # Wirecast caller would run at 120 ms (fine on fibre, drops frames on 4G). This listener owns
+  # the latency: Wirecast dials UDP WIRECAST_PORT, the relay hands the stream to MediaMTX as
+  # path WIRECAST_NAME. One relay = one Wirecast source; copy the block for a second one.
+  relay-wirecast:
+    image: live-clip-mediamtx:dev
+    restart: always
+    init: true
+    logging: *logging
+    depends_on: [mediamtx]
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        while :; do
+          ffmpeg -nostdin -hide_banner -loglevel warning \
+            -i "srt://0.0.0.0:8891?mode=listener&latency=${WIRECAST_LATENCY_MS:-1000}000&passphrase=${SRT_PASSPHRASE}&pbkeylen=0" \
+            -map 0 -c copy -f mpegts \
+            "srt://mediamtx:8890?streamid=publish:${WIRECAST_NAME:-wirecast1}&passphrase=${SRT_PASSPHRASE}&pbkeylen=16&latency=300000" \
+            2>&1 | awk '{ gsub(/passphrase=[^&" ]*/, "passphrase=***"); print; fflush() }'
+          sleep 2
+        done
+    ports:
+      - "${WIRECAST_PORT:-8891}:8891/udp"
+
   web:
     build: .
     image: live-clip-web:dev
