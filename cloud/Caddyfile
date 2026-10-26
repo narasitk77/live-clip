@@ -1,0 +1,5 @@
+# Automatic HTTPS (Let's Encrypt) for the editors' web UI. Caddy renews certificates itself.
+{$PUBLIC_HOST} {
+	encode gzip
+	reverse_proxy web:8080
+}

@@ -1,0 +1,95 @@
+# live-clip on a cloud VM (any Linux box with a public IP and Docker): same images as the NAS,
+# plus Caddy for automatic HTTPS. Required env (.env next to this file): SRT_PASSPHRASE,
+# MEDIAMTX_API_PASS, WEB_USER, WEB_PASSWORD, SRT_PUBLIC_HOST, PUBLIC_HOST (the https hostname,
+# e.g. live.thestandard.co or <ip-with-dashes>.sslip.io when no DNS is available), IMAGE_TAG.
+# Open on the VM firewall: UDP 8890, UDP 8891, TCP 80, TCP 443. Nothing else.
+x-logging: &logging
+  driver: json-file
+  options: { max-size: "10m", max-file: "3" }
+
+services:
+  mediamtx:
+    image: ghcr.io/narasitk77/live-clip-mediamtx:${IMAGE_TAG:-latest}
+    container_name: live-clip-mediamtx
+    restart: always
+    init: true
+    logging: *logging
+    environment:
+      MTX_PATHDEFAULTS_SRTPUBLISHPASSPHRASE: ${SRT_PASSPHRASE:?set SRT_PASSPHRASE (10-79 chars)}
+      MTX_AUTHINTERNALUSERS_2_PASS: ${MEDIAMTX_API_PASS:?set MEDIAMTX_API_PASS}
+      RECONNECT_MIN: ${RECONNECT_MIN:-10}
+    ports:
+      - "${SRT_PORT:-8890}:8890/udp"   # the only port the internet needs: forward UDP 8890 here
+    volumes:
+      - data:/data
+
+  # Wirecast cannot set SRT latency and MediaMTX cannot raise it on the receiving side, so a
+  # Wirecast caller would run at 120 ms (fine on fibre, drops frames on 4G). This listener owns
+  # the latency: Wirecast dials UDP WIRECAST_PORT, the relay hands the stream to MediaMTX as
+  # path WIRECAST_NAME. One relay = one Wirecast source; copy the block for a second one.
+  relay-wirecast:
+    image: ghcr.io/narasitk77/live-clip-mediamtx:${IMAGE_TAG:-latest}
+    container_name: live-clip-relay-wirecast
+    restart: always
+    init: true
+    logging: *logging
+    depends_on: [mediamtx]
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        while :; do
+          ffmpeg -nostdin -hide_banner -loglevel warning \
+            -i "srt://0.0.0.0:8891?mode=listener&latency=${WIRECAST_LATENCY_MS:-1000}000&passphrase=${SRT_PASSPHRASE}&pbkeylen=0" \
+            -map 0 -c copy -f mpegts \
+            "srt://mediamtx:8890?streamid=publish:${WIRECAST_NAME:-wirecast1}&passphrase=${SRT_PASSPHRASE}&pbkeylen=16&latency=300000" \
+            2>&1 | awk '{ gsub(/passphrase=[^&" ]*/, "passphrase=***"); print; fflush() }'
+          sleep 2
+        done
+    ports:
+      - "${WIRECAST_PORT:-8891}:8891/udp"
+
+  web:
+    image: ghcr.io/narasitk77/live-clip-web:${IMAGE_TAG:-latest}
+    container_name: live-clip-web
+    restart: always
+    depends_on: [mediamtx]
+    logging: *logging
+    environment:
+      MEDIAMTX_API: http://mediamtx:9997
+      MEDIAMTX_API_PASS: ${MEDIAMTX_API_PASS}
+      WEB_USER: ${WEB_USER}
+      WEB_PASSWORD: ${WEB_PASSWORD}
+      SRT_PASSPHRASE: ${SRT_PASSPHRASE}
+      SRT_PUBLIC_HOST: ${SRT_PUBLIC_HOST}
+      SRT_PUBLIC_PORT: ${SRT_PUBLIC_PORT:-8890}
+      RECONNECT_MIN: ${RECONNECT_MIN:-10}
+      S3_ENDPOINT: ${S3_ENDPOINT}
+      S3_REGION: ${S3_REGION}
+      S3_BUCKET: ${S3_BUCKET}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+      S3_SECRET_KEY: ${S3_SECRET_KEY}
+      S3_PREFIX: ${S3_PREFIX:-live-clips}
+      MIN_FREE_GB: ${MIN_FREE_GB:-20}
+      LOCAL_CLIP_HOURS: ${LOCAL_CLIP_HOURS:-24}
+      CUT_WORKERS: ${CUT_WORKERS:-2}
+    volumes:
+      - data:/data
+
+  caddy:
+    image: caddy:2.9.1
+    container_name: live-clip-caddy
+    restart: always
+    logging: *logging
+    depends_on: [web]
+    environment:
+      PUBLIC_HOST: ${PUBLIC_HOST:?set PUBLIC_HOST (the https hostname)}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./cloud/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+
+volumes:
+  data:
+  caddy_data:
