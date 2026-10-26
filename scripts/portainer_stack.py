@@ -3,6 +3,7 @@
 
     python3 scripts/portainer_stack.py create            # from .env.portainer
     python3 scripts/portainer_stack.py redeploy sha-abc1234   # env synced from .env.portainer
+    python3 scripts/portainer_stack.py wait sha-abc1234   # after a redeploy whose request timed out
     python3 scripts/portainer_stack.py status
     python3 scripts/portainer_stack.py logs [mediamtx|web] [N]
 
@@ -100,8 +101,8 @@ def cmd_redeploy(tag):
             'repositoryReferenceName': 'refs/heads/main', 'repositoryAuthentication': False}
     try:
         api('PUT', f'/api/stacks/{s["Id"]}/git/redeploy?endpointId={EP}', body, timeout=120)
-    except SystemExit as e:  # a client timeout while Portainer keeps pulling is normal; verify below
-        print('redeploy request ended early:', e)
+    except (SystemExit, OSError) as e:  # a client timeout while Portainer keeps pulling is normal
+        print('redeploy request ended early (Portainer continues on its own; NOT re-sending):', e)
     print('waiting for both containers to run', tag)
     show(wait_running(tag))
     s2 = api('GET', f'/api/stacks/{s["Id"]}')
@@ -109,6 +110,11 @@ def cmd_redeploy(tag):
     if got != tag:
         sys.exit(f'stack env IMAGE_TAG is {got!r}, expected {tag!r}')
     print('stack env IMAGE_TAG =', got)
+
+
+def cmd_wait(tag):
+    """Wait until both containers run `tag` (use after a redeploy whose request timed out)."""
+    show(wait_running(tag))
 
 
 def cmd_status():
@@ -137,5 +143,5 @@ def cmd_logs(which='mediamtx', n='40'):
 
 if __name__ == '__main__':
     a = sys.argv[1:] or ['status']
-    {'create': lambda: cmd_create(), 'redeploy': lambda: cmd_redeploy(a[1]), 'status': cmd_status,
+    {'create': lambda: cmd_create(), 'redeploy': lambda: cmd_redeploy(a[1]), 'wait': lambda: cmd_wait(a[1]), 'status': cmd_status,
      'logs': lambda: cmd_logs(*a[1:])}[a[0]]()
