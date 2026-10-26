@@ -64,9 +64,21 @@ docker compose up -d --build
    env ของ stack มาจากไฟล์ `.env.portainer` บนเครื่องนัท (ไม่ขึ้น git, มี `IMAGE_TAG=sha-<commit>`, รหัสทุกตัว,
    `SRT_PUBLIC_HOST=thestandard.fortiddns.com`, `MIN_FREE_GB=200`, `CUT_WORKERS=1` และค่า S3 ถ้ามี)
    สร้าง/ปรับด้วย `python3 scripts/portainer_stack.py create|redeploy <tag>|status|logs` สคริปต์เช็กว่าคอนเทนเนอร์รันแท็กที่ขอจริง
-3. **เว็บไม่เปิดพอร์ตบนโฮสต์** NPM อยู่บนเครือข่าย `management_default` เดียวกัน ให้เพิ่ม Proxy Host ใน NPM
-   ชี้ไปที่ `live-clip-web` พอร์ต `8080` พร้อม Let's Encrypt
-   ก่อนมีโดเมน ถ้าจะลองจากในออฟฟิศ ตั้ง `WEB_BIND` เป็น IP ของ NAS ชั่วคราว แล้วเข้าทาง `http://<NAS>:8089` ลบออกเมื่อมี HTTPS แล้ว
+3. **เว็บไม่เปิดพอร์ตบนโฮสต์** NPM อยู่บนเครือข่าย `management_default` เดียวกัน (ทดสอบแล้วว่า NPM เรียก `live-clip-web:8080` ถึง)
+   หลัง IT เพิ่ม DNS `liveclip.thestandard.co` แล้ว ให้เพิ่ม Proxy Host ใน NPM ตามนี้
+
+   | ช่อง | ค่า |
+   |---|---|
+   | Domain Names | liveclip.thestandard.co |
+   | Scheme | http |
+   | Forward Hostname / IP | live-clip-web |
+   | Forward Port | 8080 |
+   | Block Common Exploits | เปิด |
+   | Websockets Support | ไม่ต้อง |
+   | SSL | ขอ Let's Encrypt ใหม่ หรือใช้ใบเดียวกับ probook ถ้าเป็น wildcard, เปิด Force SSL |
+
+   วง LAN ของ NAS (192.168.21.x) เข้าจากวงออฟฟิศไม่ได้ จึงไม่มีทางลัดก่อนมีโดเมน
+   ตรวจ: `curl -su editor:<รหัส> https://liveclip.thestandard.co/api/state` ต้องได้ JSON ที่มี `"storage": "local"`
 4. **IT ต้อง forward UDP 8890** จาก FortiGate มาที่ NAS พอร์ตเดียวนี้คือทางเข้าของสัญญาณทั้งหมด
 5. **deploy รอบถัดไป** = push ขึ้น main รอ CI เสร็จ (`gh run watch`) แล้ว `python3 scripts/portainer_stack.py redeploy sha-<commit>`
    คำสั่งนี้ส่ง env จาก `.env.portainer` ไปด้วยทุกครั้ง จึงใช้เปลี่ยนรหัสหรือเปิด Wasabi ได้ด้วย

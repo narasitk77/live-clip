@@ -3,3 +3,4 @@ wirecast-today.txt
 wirecast-prod.txt
 __pycache__/
 .env.portainer
+it-request.txt
