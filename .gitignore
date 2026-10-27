@@ -1,6 +1,8 @@
 .env
-wirecast-today.txt
-wirecast-prod.txt
-__pycache__/
 .env.portainer
+__pycache__/
 it-request.txt
+stage-expertise.txt
+stage-main-tlsx.txt
+wirecast-prod.txt
+wirecast-today.txt
