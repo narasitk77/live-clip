@@ -128,7 +128,9 @@ docker compose up -d --build
 1. สร้าง VM Ubuntu ที่ Singapore ขนาด 2 vCPU / 4 GB ขึ้นไป (DigitalOcean, Vultr, Hetzner ตัวไหนก็ได้) เปิด firewall UDP 8890, UDP 8891, TCP 80, TCP 443
 2. บน VM รัน `curl -fsSL https://raw.githubusercontent.com/narasitk77/live-clip/main/cloud/setup.sh | sh`
    สคริปต์ติดตั้ง Docker, โคลนรีโป, สุ่มรหัสลง `/opt/live-clip/.env` และบอกชื่อเว็บที่จะได้
-3. `cd /opt/live-clip && docker compose -f docker-compose.cloud.yml up -d` แล้วเปิด `https://<ชื่อที่สคริปต์บอก>`
+3. `cd /opt/live-clip && docker compose up -d` แล้วเปิด `https://<ชื่อที่สคริปต์บอก>`
+   (`COMPOSE_FILE` ใน `.env` เป็นตัวเลือกไฟล์ compose ห้ามใส่ `-f` เอง เพราะบนเครื่องแบบ RTMP จะทิ้ง `docker-compose.rtmp.yml` แบบเงียบ ๆ)
+   ถ้าจะรับ RTMP ด้วย ให้ใช้ `cloud/rtmp-setup.sh` แทนข้อ 2–3 ดู [docs/runbook-cloud-rtmp.md](docs/runbook-cloud-rtmp.md)
 4. ใส่ค่า Wasabi ใน `.env` แล้ว `up -d` ใหม่ เพื่อให้คลิปไปอยู่บน Wasabi (ดิสก์ VM เล็ก ควรทำ)
 
 ค่าใช้จ่ายโดยประมาณ: VM ราว 700–1,500 บาท/เดือน; แบนด์วิดท์ที่กินคือคนดูสดผ่านเว็บ ราว 4.5 GB ต่อคนต่อชั่วโมงที่ 10 Mbps

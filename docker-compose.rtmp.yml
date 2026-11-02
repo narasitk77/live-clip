@@ -9,8 +9,7 @@
 # then: cd /opt/live-clip && docker compose up -d
 # COMPOSE_FILE matters: with "-f docker-compose.cloud.yml" this file is NOT loaded (an override is only
 # auto-loaded next to a default-named docker-compose.yml), and the image's baked config comes back
-# (RTMP off, SRT open to anyone with the passphrase). cloud/setup.sh and the README still print the
-# "-f docker-compose.cloud.yml" command: on an RTMP setup run plain "docker compose up -d".
+# (RTMP off, SRT open to anyone with the passphrase). Always run plain "docker compose ...".
 # Hostatom leaves every port open and ufw does not filter Docker-published ports: what is listed
 # under "ports" is what the internet reaches. Nothing else to open.
 services:
@@ -36,7 +35,7 @@ services:
       - "1935:1935/tcp"
       # - "1936:1936/tcp"   # RTMPS
     # RTMP only (no SRT from outside): replace the line above with the block below. Keep srt: yes in
-    # the config (dvr.sh reads back over SRT), and stop relay-wirecast too (profiles at the bottom).
+    # the config (dvr.sh reads back over SRT).
     # ports: !override
     #   - "1935:1935/tcp"
 
@@ -53,5 +52,6 @@ services:
             2>&1 | awk '{ gsub(/passphrase=[^&" ]*/, "passphrase=***"); gsub(/streamid=[^&" ]*/, "streamid=***"); print; fflush() }'
           sleep 2
         done
-    # RTMP only: uncomment so the relay (and UDP 8891) does not start.
-    # profiles: ["wirecast-srt"]
+    # Off on an RTMP setup: Wirecast sends RTMP like everyone else, and this listener takes anyone
+    # holding the SRT passphrase. Wirecast over SRT after all? Add COMPOSE_PROFILES=wirecast-srt to .env.
+    profiles: ["wirecast-srt"]

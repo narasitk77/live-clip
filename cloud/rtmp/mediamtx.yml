@@ -11,8 +11,8 @@
 # RTMP has no passphrase, so without these users anyone on the internet could publish (and,
 # with overridePublisher, kick a live stage off). SRT still needs the passphrase on top.
 # Exception: relay-wirecast listens on UDP 8891 with the passphrase alone and publishes with its
-# own user, so anyone holding the passphrase can feed wirecast1. Not using Wirecast over SRT?
-# Turn the relay off (profiles line in docker-compose.rtmp.yml).
+# own user, so anyone holding the passphrase can feed wirecast1. That is why docker-compose.rtmp.yml
+# leaves the relay off unless COMPOSE_PROFILES=wirecast-srt is set.
 # One key = one encoder on air: two encoders on the same key (a backup, or RTMP and SRT at once)
 # keep kicking each other off (measured 11 times in 40 s). Give a backup its own user and path.
 # Lock encoders to H.264 + AAC: Enhanced RTMP accepts HEVC/AV1, which the SRT read-back cannot

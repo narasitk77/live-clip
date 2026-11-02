@@ -3,3 +3,18 @@
 	encode gzip
 	reverse_proxy web:8080
 }
+
+# Plain HTTP: browsers get redirected, but a client that sends the login (WhistleCutter adds
+# http:// when the URL has no scheme, and Python follows the 308 re-sending the password) is
+# refused, so a missing https:// shows up as an error instead of leaking the password all event.
+# ACME HTTP-01 challenges are answered before these routes.
+http://{$PUBLIC_HOST} {
+	@creds header Authorization *
+	handle @creds {
+		header Content-Type "application/json; charset=utf-8"
+		respond `{"error":"ใช้ https:// เท่านั้น (พิมพ์ https:// นำหน้าที่อยู่)"}` 421
+	}
+	handle {
+		redir https://{host}{uri} 308
+	}
+}

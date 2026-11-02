@@ -1,7 +1,9 @@
 #!/bin/sh
 # One-shot setup on a fresh Ubuntu 22.04/24.04 VM (run as root):
 #   curl -fsSL https://raw.githubusercontent.com/narasitk77/live-clip/main/cloud/setup.sh | sh
-# Then edit /opt/live-clip/.env and run: cd /opt/live-clip && docker compose -f docker-compose.cloud.yml up -d
+# Then edit /opt/live-clip/.env and run: cd /opt/live-clip && docker compose up -d
+# (COMPOSE_FILE in .env picks the compose files; an explicit -f would override it and silently drop
+# docker-compose.rtmp.yml on an RTMP box, see cloud/rtmp-setup.sh)
 set -eu
 command -v docker >/dev/null 2>&1 || curl -fsSL https://get.docker.com | sh
 mkdir -p /opt && cd /opt
@@ -17,5 +19,6 @@ if [ ! -f .env ]; then
   printf 'IMAGE_TAG=latest\nPUBLIC_HOST=%s.sslip.io\n' "$(echo "$IP" | tr . -)" >> .env
   echo "wrote /opt/live-clip/.env (secrets inside). Web will be https://$(echo "$IP" | tr . -).sslip.io"
 fi
+grep -q '^COMPOSE_FILE=' .env || echo 'COMPOSE_FILE=docker-compose.cloud.yml' >>.env
 echo "firewall: allow UDP 8890, UDP 8891, TCP 80, TCP 443 at the provider, then:"
-echo "  cd /opt/live-clip && docker compose -f docker-compose.cloud.yml up -d"
+echo "  cd /opt/live-clip && docker compose up -d"
