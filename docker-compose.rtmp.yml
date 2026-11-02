@@ -1,0 +1,57 @@
+# RTMP (TCP 1935) + per-stage publish passwords for the cloud stack, layered on
+# docker-compose.cloud.yml. It mounts cloud/rtmp/mediamtx.yml in place of the config baked into the
+# image (the NAS stack and the image are untouched). Tested locally on 2 Nov 2026 with sha-17b28b5.
+# Add to /opt/live-clip/.env (a-z0-9, 24+ chars each, e.g. tr -dc 'a-z0-9' </dev/urandom | head -c 24):
+#   COMPOSE_FILE=docker-compose.cloud.yml:docker-compose.rtmp.yml
+#   MAIN_PUBLISH_PASS=...
+#   EXPERTISE_PUBLISH_PASS=...
+#   RELAY_PUBLISH_PASS=...
+# then: cd /opt/live-clip && docker compose up -d
+# COMPOSE_FILE matters: with "-f docker-compose.cloud.yml" this file is NOT loaded (an override is only
+# auto-loaded next to a default-named docker-compose.yml), and the image's baked config comes back
+# (RTMP off, SRT open to anyone with the passphrase). cloud/setup.sh and the README still print the
+# "-f docker-compose.cloud.yml" command: on an RTMP setup run plain "docker compose up -d".
+# Hostatom leaves every port open and ufw does not filter Docker-published ports: what is listed
+# under "ports" is what the internet reaches. Nothing else to open.
+services:
+  mediamtx:
+    # A directory, not a single file: a single-file mount goes stale when an editor replaces the
+    # file (README "bugs we hit"). MediaMTX hot-reloads /config/mediamtx.yml when it changes, which
+    # is a trap during the event: see the warning at the top of cloud/rtmp/mediamtx.yml.
+    command: ["/config/mediamtx.yml"]
+    volumes:
+      - ./cloud/rtmp:/config:ro
+      # RTMPS, step 2 (after Caddy has the certificate): read Caddy's Let's Encrypt files.
+      # - caddy_data:/caddy:ro
+    environment:
+      MTX_AUTHINTERNALUSERS_0_PASS: ${MAIN_PUBLISH_PASS:?set MAIN_PUBLISH_PASS (a-z0-9, 24+ chars)}
+      MTX_AUTHINTERNALUSERS_3_PASS: ${EXPERTISE_PUBLISH_PASS:?set EXPERTISE_PUBLISH_PASS (a-z0-9, 24+ chars)}
+      MTX_AUTHINTERNALUSERS_4_PASS: ${RELAY_PUBLISH_PASS:?set RELAY_PUBLISH_PASS (a-z0-9, 24+ chars)}
+      MTX_AUTHINTERNALUSERS_4_PERMISSIONS_0_PATH: ${WIRECAST_NAME:-wirecast1}
+      # RTMPS, step 2 (and set rtmpEncryption: "optional" in cloud/rtmp/mediamtx.yml). Caddy stores certs
+      # per issuer; if it fell back to ZeroSSL the folder is acme.zerossl.com-v2-dv90 instead.
+      # MTX_RTMPSERVERCERT: /caddy/caddy/certificates/acme-v02.api.letsencrypt.org-directory/${PUBLIC_HOST}/${PUBLIC_HOST}.crt
+      # MTX_RTMPSERVERKEY: /caddy/caddy/certificates/acme-v02.api.letsencrypt.org-directory/${PUBLIC_HOST}/${PUBLIC_HOST}.key
+    ports:
+      - "1935:1935/tcp"
+      # - "1936:1936/tcp"   # RTMPS
+    # RTMP only (no SRT from outside): replace the line above with the block below. Keep srt: yes in
+    # the config (dvr.sh reads back over SRT), and stop relay-wirecast too (profiles at the bottom).
+    # ports: !override
+    #   - "1935:1935/tcp"
+
+  # Same relay as docker-compose.cloud.yml; only the streamid gains the relay user's password (the
+  # anonymous publish user is gone) and the log filter also hides the streamid.
+  relay-wirecast:
+    command:
+      - |
+        while :; do
+          ffmpeg -nostdin -hide_banner -loglevel warning \
+            -i "srt://0.0.0.0:8891?mode=listener&latency=${WIRECAST_LATENCY_MS:-1000}000&passphrase=${SRT_PASSPHRASE}&pbkeylen=0" \
+            -map 0 -c copy -f mpegts \
+            "srt://mediamtx:8890?streamid=publish:${WIRECAST_NAME:-wirecast1}:relay:${RELAY_PUBLISH_PASS:?set RELAY_PUBLISH_PASS}&passphrase=${SRT_PASSPHRASE}&pbkeylen=16&latency=300000" \
+            2>&1 | awk '{ gsub(/passphrase=[^&" ]*/, "passphrase=***"); gsub(/streamid=[^&" ]*/, "streamid=***"); print; fflush() }'
+          sleep 2
+        done
+    # RTMP only: uncomment so the relay (and UDP 8891) does not start.
+    # profiles: ["wirecast-srt"]
