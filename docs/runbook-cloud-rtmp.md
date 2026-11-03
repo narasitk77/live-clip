@@ -11,6 +11,8 @@ encoder หน้างาน ──RTMP TCP 1935──▶ VM Hostatom (MediaMTX
   - มอนิเตอร์ทีละเวที (เปิดคนละแท็บ): `https://203-170-129-68.sslip.io/?stream=main` และ `?stream=xstage`
   - ตัวส่ง: `rtmp://203-170-129-68.sslip.io:1935` (หรือ `rtmp://203.170.129.68:1935`)
   - เข้า VM: `ssh -i ~/.ssh/liveclip_ed25519 root@203.170.129.68` จากแมคนัท (ติดกุญแจแล้ว ไม่ต้องใช้รหัส)
+  - ล็อกอินเว็บ/WhistleCutter: user `tsd` รหัสนัทตั้งเอง เปลี่ยนด้วย `cloud/set-web-login.sh 203.170.129.68 [user]` (พิมพ์รหัสใน Terminal ไม่ผ่านแชต) แล้วทุกคนต้องต่อใหม่
+  - **เน็ตออฟฟิศ (FortiGuard DNS 192.168.22.199) บล็อก `*.sslip.io` / nip.io / traefik.me** (เจอ 3 พ.ย.) เครื่องในออฟฟิศต้องเพิ่ม `203.170.129.68 203-170-129-68.sslip.io` ใน `/etc/hosts` หรือให้ IT ทำ DNS ส่วนตัวส่งให้ใช้ IP `rtmp://203.170.129.68:1935`
 - ไฟล์ที่ใช้:
   - `cloud/rtmp-setup.sh` ตั้งเครื่อง
   - `docker-compose.rtmp.yml` + `cloud/rtmp/mediamtx.yml` รหัสแยกต่อเวที
