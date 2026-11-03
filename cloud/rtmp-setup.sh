@@ -34,7 +34,7 @@ setenv() { if grep -q "^$1=" .env; then sed -i "s|^$1=.*|$1=$2|" .env; else prin
 val() { sed -n "s/^$1=//p" .env | tail -n 1; }
 setenv PUBLIC_HOST "$HOST"
 setenv SRT_PUBLIC_HOST "$HOST"
-setenv IMAGE_TAG sha-df0cf52   # monitor tab (3 Nov 2026); mediamtx/ and app.py identical to sha-17b28b5, tested 2 Nov
+setenv IMAGE_TAG sha-4ad4a65   # RTMP help box (3 Nov 2026); mediamtx/ unchanged since sha-17b28b5, tested 2 Nov
 setenv COMPOSE_FILE docker-compose.cloud.yml:docker-compose.rtmp.yml
 for v in MAIN_PUBLISH_PASS XSTAGE_PUBLISH_PASS RELAY_PUBLISH_PASS; do
   [ -n "$(val "$v")" ] || setenv "$v" "$(gen 32)"
