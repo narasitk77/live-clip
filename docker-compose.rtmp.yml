@@ -39,6 +39,10 @@ services:
     # ports: !override
     #   - "1935:1935/tcp"
 
+  web:
+    environment:
+      INGEST_HELP: rtmp   # the sender help box on the web page shows RTMP + per-stage keys, not plain SRT
+
   # Same relay as docker-compose.cloud.yml; only the streamid gains the relay user's password (the
   # anonymous publish user is gone) and the log filter also hides the streamid.
   relay-wirecast:

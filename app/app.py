@@ -39,6 +39,7 @@ S3_ON = all(S3[k] for k in S3_REQUIRED)
 MEDIAMTX_API = os.environ.get('MEDIAMTX_API', 'http://mediamtx:9997')
 SRT_PUBLIC_HOST = os.environ.get('SRT_PUBLIC_HOST', '')
 SRT_PUBLIC_PORT = os.environ.get('SRT_PUBLIC_PORT', '8890')
+INGEST_HELP = os.environ.get('INGEST_HELP', 'srt')  # 'rtmp': per-stage RTMP keys (docker-compose.rtmp.yml)
 MIN_FREE_GB = float(os.environ.get('MIN_FREE_GB', '20'))
 LOCAL_CLIP_HOURS = float(os.environ.get('LOCAL_CLIP_HOURS', '24'))
 CUT_WORKERS = int(os.environ.get('CUT_WORKERS', '2'))
@@ -275,6 +276,7 @@ def build_state():
         'disk': {'free_gb': round(du.free / 1e9, 1), 'total_gb': round(du.total / 1e9, 1)},
         'storage': 'wasabi' if S3_ON else 'local',
         'srt': {'host': SRT_PUBLIC_HOST, 'port': SRT_PUBLIC_PORT},
+        'ingest': INGEST_HELP,
     }
 
 

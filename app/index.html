@@ -71,7 +71,7 @@
       <p class="dim">เปลี่ยนความยาวบัฟเฟอร์ระหว่างไลฟ์ ระบบจะเริ่มตัวบันทึกใหม่ ภาพช่วงนั้นขาดไม่กี่วินาที</p>
     </details>
     <details class="card">
-      <summary>วิธีส่งสัญญาณจาก vMix / Wirecast</summary>
+      <summary>วิธีตั้งเครื่องส่ง (vMix / OBS / Wirecast)</summary>
       <div id="srtHelp" class="dim"></div>
     </details>
   </aside>
@@ -336,7 +336,12 @@ async function loadState() {
   if (document.activeElement !== $('bufMin')) $('bufMin').value = state.settings.buffer_minutes;
   if (document.activeElement !== $('keepH')) $('keepH').value = state.settings.keep_hours;
   const host = state.srt.host || '<ที่อยู่เซิร์ฟเวอร์>';
-  $('srtHelp').innerHTML = `<p>ตั้งเป็นโหมด <b>Caller</b> ส่งไปที่ <code>${esc(host)}</code> พอร์ต <code>${esc(state.srt.port)}</code></p>
+  // the address this page was opened with: the IP where office DNS filters block the name
+  if (state.ingest === 'rtmp') $('srtHelp').innerHTML = `<p><b>RTMP</b> (ใช้อันนี้) · Server <code>rtmp://${esc(location.hostname)}:1935</code> ไม่ต้องมี /live</p>
+    <p>Stream Key: ทีมเทคนิคส่งให้แยกเวที รูปแบบ <code>&lt;เวที&gt;?user=&lt;เวที&gt;&amp;pass=…</code> · ช่อง username/password ของโปรแกรมเว้นว่าง · 1 คีย์ = 1 เครื่องส่ง</p>
+    <p>วิดีโอ H.264 เท่านั้น (ห้าม HEVC/AV1) + เสียง AAC · CBR ราว 6 Mbps · Keyframe ทุก 2 วินาที</p>
+    <p>SRT เฉพาะเมื่อเน็ตหน้างานบล็อกพอร์ต 1935: Caller → <code>${esc(location.hostname)}</code> พอร์ต <code>${esc(state.srt.port)}</code> · Stream ID <code>publish:&lt;เวที&gt;:&lt;เวที&gt;:&lt;รหัส&gt;</code> + Passphrase จากทีมเทคนิค · Latency 2000 ms</p>`;
+  else $('srtHelp').innerHTML = `<p>ตั้งเป็นโหมด <b>Caller</b> ส่งไปที่ <code>${esc(host)}</code> พอร์ต <code>${esc(state.srt.port)}</code></p>
     <p>Stream ID: <code>publish:ชื่อสัญญาณ</code> เช่น <code>publish:cam1</code> (ตัวเล็ก ตัวเลข - _ ไม่เกิน 32 ตัว)</p>
     <p>Passphrase: ใส่รหัสที่ทีมเทคนิคให้ · Key length 128 ขึ้นไป · Latency แนะนำ 1000–2000 ms</p>
     <p>วิดีโอ H.264 + เสียง AAC ราว 10 Mbps · Keyframe ทุก 1–2 วินาที</p>`;
