@@ -76,13 +76,14 @@ services:
       - data:/data
 
   caddy:
-    image: caddy:2.9.1
+    image: caddy:2.11.7   # 2.10+ for the ACME "shortlived" profile (IP certificates)
     container_name: live-clip-caddy
     restart: always
     logging: *logging
     depends_on: [web]
     environment:
       PUBLIC_HOST: ${PUBLIC_HOST:?set PUBLIC_HOST (the https hostname)}
+      PUBLIC_IP: ${PUBLIC_IP:?set PUBLIC_IP (the VM public IPv4, also served over https)}
     ports:
       - "80:80"
       - "443:443"

@@ -20,5 +20,6 @@ if [ ! -f .env ]; then
   echo "wrote /opt/live-clip/.env (secrets inside). Web will be https://$(echo "$IP" | tr . -).sslip.io"
 fi
 grep -q '^COMPOSE_FILE=' .env || echo 'COMPOSE_FILE=docker-compose.cloud.yml' >>.env
+grep -q '^PUBLIC_IP=' .env || echo "PUBLIC_IP=$IP" >>.env   # https://<IP> works where DNS filters block the name
 echo "firewall: allow UDP 8890, UDP 8891, TCP 80, TCP 443 at the provider, then:"
 echo "  cd /opt/live-clip && docker compose up -d"

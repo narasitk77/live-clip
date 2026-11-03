@@ -51,7 +51,7 @@ umask 077
     p=$(val "$(echo "$s" | tr a-z A-Z)_PUBLISH_PASS")
     echo
     echo "== $s =="
-    echo "RTMP  Server:     rtmp://$HOST:1935      (until DNS works: rtmp://$IP:1935)"
+    echo "RTMP  Server:     rtmp://$IP:1935      (or rtmp://$HOST:1935 where DNS is not filtered)"
     echo "      Stream key: $s?user=$s&pass=$p"
     echo "      (Server without /live; leave the encoder's username/password fields empty)"
     echo "SRT fallback, only if the venue blocks TCP 1935:"
@@ -62,9 +62,10 @@ umask 077
   done
   echo
   echo "== WhistleCutter: Live > tab 'จาก Stream' =="
-  echo "URL https://$HOST (type https:// yourself; without it the password crosses in clear text)"
+  echo "URL https://$IP   (type https:// yourself; or https://$HOST where DNS is not filtered:"
+  echo "    the office FortiGuard DNS blocks *.sslip.io; without https:// the password crosses in clear)"
   echo "user $(val WEB_USER)   password $(val WEB_PASSWORD)"
-  echo "Before DNS works: ssh tunnel (docs/runbook-cloud-rtmp.md) and use http://127.0.0.1:18080"
+  echo "Per-stage monitor: https://$IP/?stream=main and https://$IP/?stream=xstage"
 } >/root/live-clip-senders.txt
 
 echo "pulling ~220 MB of images (several minutes on the 4 Mbps international link), do not Ctrl-C"
