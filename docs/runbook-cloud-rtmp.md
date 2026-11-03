@@ -6,7 +6,11 @@ encoder หน้างาน ──RTMP TCP 1935──▶ VM Hostatom (MediaMTX
 
 - เครื่อง: Hostatom Cloud VPS SSD3 (4 vCPU / 8 GB / 80 GB) สั่งเมื่อ 2 พ.ย. 2026 รอบบิลถึง 2 ธ.ค. 2026
 - ชื่อ `live.tsd.co` ในหน้า Hostatom เป็นแค่ป้ายชื่อเครื่อง `tsd.co` ไม่ใช่โดเมนของเรา (เป็นโดเมนที่วางขายบน Afternic) ห้ามใช้ทำ DNS
-- ชื่อจริงที่จะใช้คือ `liveclip.thestandard.co` (เช็กแล้ว 2 พ.ย. ว่ายังว่าง) ถ้าเลือกชื่ออื่น ให้แทนที่ทุกจุดในไฟล์นี้
+- **ตัดสินใจ 3 พ.ย. 2026: ใช้ `203-170-129-68.sslip.io` ตลอดงาน ไม่ขอ DNS จาก IT** ทุกที่ในไฟล์นี้ที่ยังเขียน `liveclip.thestandard.co` (ข้อ 0, 1, 3, 4) ให้อ่านเป็น `203-170-129-68.sslip.io` ส่วนข้อ 0 กับ 3 เก็บไว้เผื่อเปลี่ยนใจ
+  - เว็บ / WhistleCutter: `https://203-170-129-68.sslip.io`
+  - มอนิเตอร์ทีละเวที (เปิดคนละแท็บ): `https://203-170-129-68.sslip.io/?stream=main` และ `?stream=xstage`
+  - ตัวส่ง: `rtmp://203-170-129-68.sslip.io:1935` (หรือ `rtmp://203.170.129.68:1935`)
+  - เข้า VM: `ssh -i ~/.ssh/liveclip_ed25519 root@203.170.129.68` จากแมคนัท (ติดกุญแจแล้ว ไม่ต้องใช้รหัส)
 - ไฟล์ที่ใช้:
   - `cloud/rtmp-setup.sh` ตั้งเครื่อง
   - `docker-compose.rtmp.yml` + `cloud/rtmp/mediamtx.yml` รหัสแยกต่อเวที

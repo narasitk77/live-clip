@@ -1,11 +1,11 @@
 #!/bin/bash
 # The whole first test from this Mac, once Hostatom's email arrives (asks for the root password once):
-#   cloud/up-from-mac.sh <VM IP> [hostname, default liveclip.thestandard.co]
+#   cloud/up-from-mac.sh <VM IP> [hostname, default <ip-with-dashes>.sslip.io, which needs no DNS work]
 # 1. runs cloud/rtmp-setup.sh on the VM   2. copies the sender sheet to ./senders-cloud.txt (0600, gitignored)
 # 3. sends a 15-minute RTMP test pattern as stage "xstage"   4. opens the web tunnel on 127.0.0.1:18080
 # Then in WhistleCutter: Live > จาก Stream > http://127.0.0.1:18080. Ctrl-C closes the tunnel and the test.
 set -euo pipefail
-ip=${1:?VM IP from the Hostatom email}; host=${2:-liveclip.thestandard.co}
+ip=${1:?VM IP from the Hostatom email}; host=${2:-$(echo "$ip" | tr . -).sslip.io}
 cd "$(dirname "$0")/.."
 mkdir -p ~/.ssh
 # One ssh connection reused by every step below, so the password is typed once. accept-new trusts the

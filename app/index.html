@@ -141,6 +141,17 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 
 let state = null, hls = null, cur = null; // cur = {stream, session, live}
 let inMs = null, outMs = null, scrubbing = false;
+// ?stream=<name>: one stage per tab, as a monitor. Opens that stage's live round by itself,
+// jumps back to the live edge when the encoder returns, and moves to a newer round when one
+// starts. followSeen = newest live round already opened, so a round the viewer picked by
+// hand is left alone until a newer one starts.
+const FOLLOW = (new URLSearchParams(location.search).get('stream') || '').match(/^[a-z0-9_-]{1,32}$/)?.[0] || null;
+let followSeen = null;
+if (FOLLOW) {
+  document.title = `${FOLLOW} · Live Clip`;
+  document.querySelector('header h1').textContent = `Live Clip · ${FOLLOW}`;
+  $('nowPlaying').textContent = `รอสัญญาณ ${FOLLOW}…`;
+}
 
 async function api(path, body) {
   const r = await fetch(ORIGIN + path, body === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -181,9 +192,17 @@ function seekTo(t) { const r = seekRange(); if (!r) return; v.currentTime = Math
 
 // ---- player ----
 function load(stream, session, live, keepMs) {
+  // In/Out are wall-clock times of the round they were set on; cutting them from another round
+  // fails with "out of the buffer" even though the footage is still in the old round
+  if ((inMs != null || outMs != null) && cur && (cur.stream !== stream || cur.session !== session)) {
+    inMs = outMs = null; renderPoints();
+    $('clipMsg').textContent = `ล้างจุด In/Out แล้ว เพราะเปลี่ยนไปรอบ ${session} (คลิปจากรอบเดิม: กดรอบนั้นทางซ้ายแล้วตั้งจุดใหม่)`;
+  }
   cur = { stream, session, live };
   $('playerMsg').textContent = '';
-  $('nowPlaying').innerHTML = `<b>${esc(stream)}</b> · รอบ ${esc(session)} ${live ? '<span class="live-badge">LIVE</span>' : '<span class="dim">จบแล้ว</span>'}`;
+  const status = live ? '<span class="live-badge">LIVE</span>'
+    : stream === FOLLOW ? '<span class="dim">ไม่มีสัญญาณเข้า · ภาพสดจะกลับมาเองเมื่อเครื่องส่งต่อใหม่</span>' : '<span class="dim">จบแล้ว</span>';
+  $('nowPlaying').innerHTML = `<b>${esc(stream)}</b> · รอบ ${esc(session)} ${status}`;
   if (hls) hls.destroy();
   if (!window.Hls || !Hls.isSupported()) { $('playerMsg').textContent = 'เบราว์เซอร์นี้เล่น HLS ไม่ได้ ใช้ Chrome/Edge/Firefox/Safari รุ่นใหม่'; return; }
   hls = new Hls({ liveSyncDurationCount: 3, maxBufferLength: 30, backBufferLength: 90 });
@@ -193,6 +212,11 @@ function load(stream, session, live, keepMs) {
     if (d.type === Hls.ErrorTypes.NETWORK_ERROR) setTimeout(() => hls && hls.startLoad(), 2000);
     else if (d.type === Hls.ErrorTypes.MEDIA_ERROR) hls.recoverMediaError();
   });
+  // The server adds ENDLIST once the playlist is 20 s old. If hls.js sees that during an encoder
+  // drop but the 4 s state poll does not, hls.js stops reloading and freezes on the last frame
+  // while the round shows LIVE. Forget what we know so the next poll reloads either way.
+  const mine = hls;
+  hls.on(Hls.Events.LEVEL_LOADED, (_, d) => { if (hls === mine && cur && cur.live && !d.details.live) cur.live = null; });
   hls.once(Hls.Events.LEVEL_LOADED, () => {
     $('playerMsg').textContent = '';
     if (keepMs != null) { const t = msToMedia(keepMs); if (t != null) setTimeout(() => seekTo(t), 300); }
@@ -291,7 +315,9 @@ function renderStreams() {
     <div class="stream"><h3>
       <span class="dot ${s.receiving ? 'on' : ''}" title="รับสัญญาณ"></span>
       <span class="dot ${s.recording ? 'live' : ''}" title="บันทึกบัฟเฟอร์"></span>
-      ${esc(s.name)} <small class="dim">${s.kbps ? (s.kbps / 1000).toFixed(1) + ' Mbps' : ''}</small></h3>
+      ${esc(s.name)} <small class="dim">${s.kbps ? (s.kbps / 1000).toFixed(1) + ' Mbps' : ''}</small>
+      <a href="?stream=${encodeURIComponent(s.name)}" target="_blank" rel="noopener" title="เปิดเวทีนี้ในแท็บใหม่ ตามภาพสดให้เอง"
+         style="margin-left:auto; color:var(--accent); font-size:12px; font-weight:400">แท็บใหม่ ↗</a></h3>
       ${s.sessions.map((x) => `<button class="sess ${cur && cur.stream === s.name && cur.session === x.id ? 'sel' : ''}"
           data-s="${esc(s.name)}" data-id="${esc(x.id)}" data-live="${x.live ? 1 : ''}">
           ${x.live ? '<span class="live-badge">LIVE</span> ' : ''}${x.first ? fmtD.format(x.first * 1000) + ' ' + hm(x.first * 1000) : ''}–${x.last ? hm(x.last * 1000) : ''}
@@ -322,10 +348,29 @@ async function loadState() {
       cur = null;
       $('playerMsg').textContent = 'รอบที่เปิดอยู่ถูกลบออกจากบัฟเฟอร์แล้ว เลือกรอบอื่นทางซ้าย';
     }
-    else if (sess.live !== cur.live) load(cur.stream, cur.session, sess.live, nowMs());  // keep the editor's position
+    // keep the editor's position; a monitor tab goes straight to the live edge instead
+    else if (sess.live !== cur.live) load(cur.stream, cur.session, sess.live, sess.live && cur.stream === FOLLOW ? undefined : nowMs());
+  }
+  if (FOLLOW) {
+    const s = state.streams.find((x) => x.name === FOLLOW);
+    const newest = s && s.sessions.filter((x) => x.live).sort((a, b) => (a.id < b.id ? 1 : -1))[0];
+    if (newest && newest.id !== followSeen) {
+      followSeen = newest.id;
+      if (!cur || cur.session !== newest.id || cur.stream !== FOLLOW || !cur.live) load(FOLLOW, newest.id, true);
+    }
   }
   renderStreams();
 }
+// a monitor tab left in the background falls behind (the browser throttles it): catch up on
+// return, but only if it was watching live when hidden, never undoing a pause or a scrub back
+let hiddenAtLive = false;
+document.addEventListener('visibilitychange', () => {
+  if (!FOLLOW) return;
+  const r = seekRange();
+  if (document.hidden) { hiddenAtLive = !!(cur && cur.live && r && !v.paused && r[1] - v.currentTime < 12); return; }
+  loadState();
+  if (hiddenAtLive && cur && cur.live) $('toLive').click();
+});
 $('saveSettings').onclick = async () => {
   $('settingsMsg').textContent = '';
   try {
