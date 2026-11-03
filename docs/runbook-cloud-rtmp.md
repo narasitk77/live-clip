@@ -131,6 +131,11 @@ ssh -N -L 18080:$(ssh root@<IP> "docker inspect -f '{{range .NetworkSettings.Net
 
 ถ้า Caddy ขอ cert ไม่สำเร็จ ให้สั่ง `docker compose stop caddy` ทันที แล้วหาสาเหตุก่อน เพราะ Let's Encrypt ยอมให้ล้มได้แค่ 5 ครั้งต่อชั่วโมง
 
+**ไม่อยากรอ IT:** ใช้ชื่อ `<IP ขีดแทนจุด>.sslip.io` (เช่น `203-170-129-68.sslip.io`) ซึ่งชี้กลับมาที่ IP เองทันที
+บน VM: `cd /opt/live-clip && git pull -q && sh cloud/rtmp-setup.sh 203-170-129-68.sslip.io && docker compose up -d`
+(ใช้สำเนาในเครื่องหลัง `git pull` ไม่ใช่ `curl` จาก main เพราะ GitHub cache ไฟล์ 5 นาที)
+ใช้ได้จริงเมื่อ 3 พ.ย. 2026: ได้ cert Let's Encrypt และ DNS ออฟฟิศเปิดได้ พอ IT ทำ DNS แล้วรันคำสั่งเดิมด้วยชื่อ `liveclip.thestandard.co` แล้วแจ้ง URL ใหม่ให้ทุกคน
+
 ## 4. ทดสอบของจริง
 
 ค่าตั้งของทุกเวทีให้เอาจากไฟล์ `/root/live-clip-senders.txt` เท่านั้น ห้ามใช้กล่อง "วิธีส่ง" ในหน้าเว็บ live-clip เพราะกล่องนั้นยังสอนรูปแบบ SRT แบบเก่าที่ใช้ไม่ได้กับเครื่องนี้
