@@ -68,6 +68,19 @@ def main():
         == '#EXT-X-PROGRAM-DATE-TIME:2026-10-21T07:00:00.000+00:00'
     assert app.content_disposition('สัมภาษณ์ "ช่วงแรก"').startswith('attachment; filename="')
     assert Seg(1, 2, 'x').end == 3
+
+    # YouTube push state shown on the page (cloud/rtmp/youtube.sh writes these files)
+    import pathlib, tempfile
+    with tempfile.TemporaryDirectory() as td:
+        y = pathlib.Path(td)
+        assert app.youtube_state(y, 'main', 1000) is None, 'not armed'
+        (y / 'main.key').write_text('secret')
+        assert app.youtube_state(y, 'main', 1000) == ('on', ''), 'armed, never ran'
+        (y / 'main.status').write_text('failing 990 [flv] <destination> I/O error\n')
+        assert app.youtube_state(y, 'main', 1000) == ('failing', '[flv] <destination> I/O error')
+        assert app.youtube_state(y, 'main', 1100) == ('on', ''), 'stale failure: stage went offline'
+        (y / 'main.status').write_text('pushing 995\n')
+        assert app.youtube_state(y, 'main', 1000) == ('on', '')
     print('test_app: all checks passed')
 
 

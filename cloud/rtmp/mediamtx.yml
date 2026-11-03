@@ -101,6 +101,10 @@ pathDefaults:
   # Started when a stream becomes available, stopped with SIGINT when it goes away.
   runOnAvailable: /dvr.sh
   runOnAvailableRestart: yes
+  # YouTube: pushes a stage while /data/youtube/<stage>.key exists (cloud/set-youtube-key.sh);
+  # without that file the script only idles. Separate hook so the buffer recorder is untouched.
+  runOnOnline: sh /config/youtube.sh
+  runOnOnlineRestart: yes
   # A new publisher with the right credentials replaces the current one at once. With "no", an
   # encoder whose 4G/TCP link died is refused ("someone is already publishing") until readTimeout
   # (10 s) drops the dead connection, and its retry backoff stretches the gap further.

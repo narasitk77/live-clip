@@ -29,6 +29,7 @@ log = logging.getLogger('live-clip')
 
 DATA = Path(os.environ.get('DATA_DIR', '/data'))
 DVR, CLIPS, SETTINGS = DATA / 'dvr', DATA / 'clips', DATA / 'settings'
+YOUTUBE = DATA / 'youtube'   # cloud/rtmp/youtube.sh: <stage>.key arms the push, <stage>.status reports it
 HERE = Path(__file__).resolve().parent
 WEB_USER = os.environ.get('WEB_USER', '')
 WEB_PASSWORD = os.environ.get('WEB_PASSWORD', '')
@@ -263,10 +264,16 @@ def build_state():
         ready_for = now - _iso_ts(item.get('readyTime')) if receiving and item.get('readyTime') else 0
         if receiving and not recording and ready_for > 30:
             warn[f'rec:{name}'] = f'{name}: รับสัญญาณอยู่แต่ไม่ได้บันทึกบัฟเฟอร์ ดู log ของ mediamtx'
+        yt = youtube_state(YOUTUBE, name, now)
+        if yt and yt[0] == 'failing':
+            warn[f'yt:{name}'] = (f'YouTube {name}: ส่งไม่ขึ้น ({yt[1] or "ดู log ของ mediamtx"}) '
+                                  'ตรวจ Stream key และไลฟ์ใน YouTube Studio')
         out.append({'name': name, 'receiving': receiving if paths is not None else None,
-                    'recording': recording, 'kbps': kbps, 'sessions': sessions})
+                    'recording': recording, 'kbps': kbps, 'sessions': sessions,
+                    'youtube': yt[0] if yt else None})
     sync_warnings('pl:', {k: v for k, v in warn.items() if k.startswith('pl:')})
     sync_warnings('rec:', {k: v for k, v in warn.items() if k.startswith('rec:')})
+    sync_warnings('yt:', {k: v for k, v in warn.items() if k.startswith('yt:')})
     du = shutil.disk_usage(DATA)
     with LOCK:
         warnings = list(WARNINGS.values())
@@ -278,6 +285,21 @@ def build_state():
         'srt': {'host': SRT_PUBLIC_HOST, 'port': SRT_PUBLIC_PORT},
         'ingest': INGEST_HELP,
     }
+
+
+def youtube_state(ydir, name, now):
+    """None if the stage's YouTube push is not armed, else ('on' | 'failing', detail).
+    Looks only at whether the key file exists, never at the key."""
+    if not (ydir / f'{name}.key').exists():
+        return None
+    try:
+        words = (ydir / f'{name}.status').read_text().strip().split(' ', 2)
+    except OSError:
+        return 'on', ''   # armed; the stage has not been live since
+    # youtube.sh rewrites "failing" on every failed try (~every 15 s while live); older = stage went offline
+    if words[0] == 'failing' and len(words) > 1 and words[1].isdigit() and now - int(words[1]) < 60:
+        return 'failing', words[2] if len(words) > 2 else ''
+    return 'on', ''
 
 
 def _iso_ts(value):

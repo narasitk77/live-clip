@@ -316,6 +316,7 @@ function renderStreams() {
       <span class="dot ${s.receiving ? 'on' : ''}" title="รับสัญญาณ"></span>
       <span class="dot ${s.recording ? 'live' : ''}" title="บันทึกบัฟเฟอร์"></span>
       ${esc(s.name)} <small class="dim">${s.kbps ? (s.kbps / 1000).toFixed(1) + ' Mbps' : ''}</small>
+      ${s.youtube ? `<small style="color:var(${s.youtube === 'failing' ? '--live' : '--ok'})" title="ส่งต่อขึ้น YouTube">YouTube ${s.youtube === 'failing' ? 'ส่งไม่ขึ้น' : 'ON'}</small>` : ''}
       <a href="?stream=${encodeURIComponent(s.name)}" target="_blank" rel="noopener" title="เปิดเวทีนี้ในแท็บใหม่ ตามภาพสดให้เอง"
          style="margin-left:auto; color:var(--accent); font-size:12px; font-weight:400">แท็บใหม่ ↗</a></h3>
       ${s.sessions.map((x) => `<button class="sess ${cur && cur.stream === s.name && cur.session === x.id ? 'sel' : ''}"
