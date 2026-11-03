@@ -1,4 +1,10 @@
 # Automatic HTTPS (Let's Encrypt) for the editors' web UI. Caddy renews certificates itself.
+{
+	# a client opening https://<IP> sends no SNI (an IP may not be one); without this Caddy has no
+	# certificate to pick and fails the handshake ("tlsv1 alert internal error")
+	default_sni {$PUBLIC_IP}
+}
+
 (app) {
 	encode gzip
 	reverse_proxy web:8080
