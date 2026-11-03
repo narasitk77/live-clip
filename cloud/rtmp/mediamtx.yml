@@ -79,14 +79,14 @@ authInternalUsers:
     ips: []
     permissions:
       - action: api
-  # 3: expertise stage (our OBS). RTMP key expertise?user=expertise&pass=<EXPERTISE_PUBLISH_PASS>
-  #    SRT: streamid publish:expertise:expertise:<EXPERTISE_PUBLISH_PASS> plus the SRT passphrase.
-  - user: expertise
+  # 3: xstage = X stage (our OBS on the AIS 5G router). RTMP key xstage?user=xstage&pass=<XSTAGE_PUBLISH_PASS>
+  #    SRT: streamid publish:xstage:xstage:<XSTAGE_PUBLISH_PASS> plus the SRT passphrase.
+  - user: xstage
     pass: sha256:0Ca3zq07I1NDFiKCFY5rfzq+fdaBwuepnpyDSXwDxP4=
     ips: []
     permissions:
       - action: publish
-        path: expertise
+        path: xstage
   # 4: relay-wirecast (Wirecast SRT on UDP 8891 -> here). Path follows WIRECAST_NAME via env.
   #    Never handed to anyone outside the VM.
   - user: relay

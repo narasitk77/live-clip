@@ -36,7 +36,7 @@ setenv PUBLIC_HOST "$HOST"
 setenv SRT_PUBLIC_HOST "$HOST"
 setenv IMAGE_TAG sha-17b28b5   # the image docker-compose.rtmp.yml was tested with on 2 Nov 2026
 setenv COMPOSE_FILE docker-compose.cloud.yml:docker-compose.rtmp.yml
-for v in MAIN_PUBLISH_PASS EXPERTISE_PUBLISH_PASS RELAY_PUBLISH_PASS; do
+for v in MAIN_PUBLISH_PASS XSTAGE_PUBLISH_PASS RELAY_PUBLISH_PASS; do
   [ -n "$(val "$v")" ] || setenv "$v" "$(gen 32)"
 done
 chmod 600 .env
@@ -47,7 +47,7 @@ umask 077
 {
   echo "live-clip senders: $HOST ($IP). Secret - send each stage only its own block, never in a group chat."
   echo "Video H.264 (never HEVC/AV1) + AAC stereo, keyframe every 2 s, one encoder per key."
-  for s in main expertise; do
+  for s in main xstage; do
     p=$(val "$(echo "$s" | tr a-z A-Z)_PUBLISH_PASS")
     echo
     echo "== $s =="

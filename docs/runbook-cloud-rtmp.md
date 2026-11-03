@@ -35,7 +35,7 @@ cloud/up-from-mac.sh <IP>
 คำสั่งนี้ถามรหัส root ครั้งเดียว แล้วทำข้อ 1 และข้อ 2.1–2.2 ให้ทั้งหมด:
 - ตั้งเครื่อง
 - ดึงไฟล์ค่าตั้งมาไว้ที่ `senders-cloud.txt` (ไฟล์ลับ ไม่ขึ้น git)
-- ส่งภาพทดสอบเข้าเวที `expertise` 15 นาที
+- ส่งภาพทดสอบเข้าเวที `xstage` 15 นาที
 - เปิดอุโมงค์ไว้ที่ `http://127.0.0.1:18080`
 
 เหลือแค่ทำข้อ 2.3–2.4 (เปิดเว็บ แล้วต่อ WhistleCutter) จากนั้นค่อย `passwd` เปลี่ยนรหัส root
@@ -65,7 +65,7 @@ curl -fsSL https://raw.githubusercontent.com/narasitk77/live-clip/main/cloud/rtm
 สคริปต์ทำสิ่งเหล่านี้:
 
 - ติดตั้ง git และ Docker แล้ว clone รีโปไปที่ `/opt/live-clip`
-- สุ่มรหัสทั้งหมด: passphrase SRT, รหัสเว็บ และรหัส publish ของเวที `main` (Tlsx), `expertise` (เวที X) และ relay
+- สุ่มรหัสทั้งหมด: passphrase SRT, รหัสเว็บ และรหัส publish ของเวที `main` (Tlsx), `xstage` (เวที X) และ relay
 - pin อิมเมจ `sha-17b28b5` (ตัวที่ทดสอบแล้ว)
 - เปิด MediaMTX + เว็บ (ยังไม่เปิด Caddy) ตรวจว่าพอร์ต 1935 รับอยู่ และเว็บอ่าน MediaMTX ได้
 - ตั้ง "เก็บหลังจบ" เป็น 8 ชม. เพราะดิสก์ 80 GB เก็บ 24 ชม. ไม่พอ
@@ -88,7 +88,7 @@ curl -fsSL https://raw.githubusercontent.com/narasitk77/live-clip/main/cloud/rtm
 **2.1 ส่งภาพทดสอบจากแมค** (รันในโฟลเดอร์ live-clip) ใส่ key ในเครื่องหมาย `'...'` เสมอ
 
 ```bash
-test/send_rtmp.sh rtmp://<IP>:1935 'expertise?user=expertise&pass=<รหัส expertise>' 900
+test/send_rtmp.sh rtmp://<IP>:1935 'xstage?user=xstage&pass=<รหัส xstage>' 900
 ```
 
 ภาพทดสอบมีตัวเลขเวลาของตัวเอง ละเอียด 1/100 วินาที และมีเสียง 1 kHz
@@ -101,7 +101,7 @@ ssh -N -L 18080:$(ssh root@<IP> "docker inspect -f '{{range .NetworkSettings.Net
 
 คำสั่งนี้จะถามรหัส root สองครั้ง ถ้ารีสตาร์ท container แล้ว IP ภายในเปลี่ยน ให้รันใหม่
 
-**2.3 เปิด `http://127.0.0.1:18080` ในเบราว์เซอร์** ใช้ user `editor` กับรหัสจากไฟล์ senders สัญญาณ `expertise` ต้องผ่านทุกข้อนี้:
+**2.3 เปิด `http://127.0.0.1:18080` ในเบราว์เซอร์** ใช้ user `editor` กับรหัสจากไฟล์ senders สัญญาณ `xstage` ต้องผ่านทุกข้อนี้:
 - จุดเขียว (รับสัญญาณ) ติด
 - จุดแดง (บันทึกบัฟเฟอร์) ติด
 - มีรอบที่มีป้าย LIVE และตัวเลข "มีภาพ m:ss" เพิ่มขึ้นเรื่อย ๆ
@@ -110,7 +110,7 @@ ssh -N -L 18080:$(ssh root@<IP> "docker inspect -f '{{range .NetworkSettings.Net
 **2.4 WhistleCutter**
 1. หน้าแรก → **Live** → แท็บ **จาก Stream**
 2. URL `http://127.0.0.1:18080` + user/รหัสเดียวกัน → **เชื่อมต่อ**
-3. เลือกสัญญาณ `expertise` รอบที่เป็น LIVE → กด **ล่าสุด**
+3. เลือกสัญญาณ `xstage` รอบที่เป็น LIVE → กด **ล่าสุด**
 4. กด **◉ IN** แล้ว **◉ OUT** (ไม่มีคีย์ลัด) → **เพิ่ม** → **ตัดทั้งหมด (1)** → เข้าขั้นตรวจ
 
 เกณฑ์ผ่าน:
@@ -138,7 +138,7 @@ ssh -N -L 18080:$(ssh root@<IP> "docker inspect -f '{{range .NetworkSettings.Net
 **เวที X: OBS + เราเตอร์ AIS 5G**
 - Settings > Stream: Service `Custom...`
   - Server: `rtmp://liveclip.thestandard.co:1935`
-  - Stream Key: `expertise?user=expertise&pass=<รหัส>`
+  - Stream Key: `xstage?user=xstage&pass=<รหัส>`
   - ไม่ติ๊ก Use authentication
 - Settings > Output (Advanced) > Streaming
   - Encoder H.264 (x264 หรือ Apple VT H264), Rate Control CBR 6000 Kbps

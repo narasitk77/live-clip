@@ -4,7 +4,7 @@
 # Add to /opt/live-clip/.env (a-z0-9, 24+ chars each, e.g. tr -dc 'a-z0-9' </dev/urandom | head -c 24):
 #   COMPOSE_FILE=docker-compose.cloud.yml:docker-compose.rtmp.yml
 #   MAIN_PUBLISH_PASS=...
-#   EXPERTISE_PUBLISH_PASS=...
+#   XSTAGE_PUBLISH_PASS=...
 #   RELAY_PUBLISH_PASS=...
 # then: cd /opt/live-clip && docker compose up -d
 # COMPOSE_FILE matters: with "-f docker-compose.cloud.yml" this file is NOT loaded (an override is only
@@ -24,7 +24,7 @@ services:
       # - caddy_data:/caddy:ro
     environment:
       MTX_AUTHINTERNALUSERS_0_PASS: ${MAIN_PUBLISH_PASS:?set MAIN_PUBLISH_PASS (a-z0-9, 24+ chars)}
-      MTX_AUTHINTERNALUSERS_3_PASS: ${EXPERTISE_PUBLISH_PASS:?set EXPERTISE_PUBLISH_PASS (a-z0-9, 24+ chars)}
+      MTX_AUTHINTERNALUSERS_3_PASS: ${XSTAGE_PUBLISH_PASS:?set XSTAGE_PUBLISH_PASS (a-z0-9, 24+ chars)}
       MTX_AUTHINTERNALUSERS_4_PASS: ${RELAY_PUBLISH_PASS:?set RELAY_PUBLISH_PASS (a-z0-9, 24+ chars)}
       MTX_AUTHINTERNALUSERS_4_PERMISSIONS_0_PATH: ${WIRECAST_NAME:-wirecast1}
       # RTMPS, step 2 (and set rtmpEncryption: "optional" in cloud/rtmp/mediamtx.yml). Caddy stores certs

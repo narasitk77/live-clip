@@ -2,7 +2,7 @@
 # Fake stage encoder over RTMP: test pattern showing its own timestamp (1/100 s) + 1 kHz tone,
 # H.264/AAC 4 Mbps, keyframe 2 s.
 # Usage: test/send_rtmp.sh <server> <stream key> [seconds]
-#   test/send_rtmp.sh rtmp://liveclip.thestandard.co:1935 'expertise?user=expertise&pass=...' 600
+#   test/send_rtmp.sh rtmp://liveclip.thestandard.co:1935 'xstage?user=xstage&pass=...' 600
 # Quote the key ('&' splits a shell command). It holds the stage password, so every line ffmpeg
 # prints goes through a mask. Uses ffmpeg on PATH, else the one inside ~/WhistleCutter.
 set -o pipefail
