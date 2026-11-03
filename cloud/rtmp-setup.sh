@@ -58,7 +58,9 @@ umask 077
     echo "  OBS/ffmpeg URL: srt://$HOST:8890?streamid=publish:$s:$s:$p&passphrase=$SRTP&latency=2000000"
     echo "  vMix fields:    Caller, Hostname $HOST, Port 8890, Latency 2000 ms, Passphrase $SRTP,"
     echo "                  Key length 16, Stream ID publish:$s:$s:$p"
-    echo "  Wirecast: use RTMP (its SRT has no latency setting)"
+    echo "  Wirecast: Address srt://$HOST, Port 8890, Passphrase $SRTP, Stream ID publish:$s:$s:$p (no latency"
+    echo "            field: fixed 120 ms, fine on a stable link). Company Macs (Sophos) cannot send RTMP from"
+    echo "            Wirecast at all; there use this SRT, or OBS over RTMP on a 5G link."
   done
   echo
   echo "== WhistleCutter: Live > tab 'จาก Stream' =="

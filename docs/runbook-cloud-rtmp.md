@@ -165,7 +165,7 @@ ssh -N -L 18080:$(ssh root@<IP> "docker inspect -f '{{range .NetworkSettings.Net
 | encoder | ช่องที่ต้องกรอก |
 |---|---|
 | vMix | Streaming → Destination `Custom RTMP Server` → URL `rtmp://liveclip.thestandard.co:1935`, Stream Key `main?user=main&pass=<รหัส>` (ช่อง Username/Password ใน Advanced ให้เว้นว่าง) |
-| Wirecast | Output Settings → RTMP Server → Address `rtmp://liveclip.thestandard.co:1935`, Stream `main?user=main&pass=<รหัส>` (ไม่ต้องกด Set Credentials) ช่อง keyframe นับเป็นเฟรม ที่ 30 fps ใส่ 60 ส่วน SRT ของ Wirecast ตั้ง latency ไม่ได้ ให้ใช้ RTMP เท่านั้น |
+| Wirecast | Output Settings → RTMP Server → Address `rtmp://liveclip.thestandard.co:1935`, Stream `main?user=main&pass=<รหัส>` (ไม่ต้องกด Set Credentials) ช่อง keyframe นับเป็นเฟรม ที่ 30 fps ใส่ 60 · **บนคอมบริษัท (Sophos/JumpCloud) RTMP จาก Wirecast ออกไม่ได้** (3 พ.ย. 2026: ไม่มี SYN ถึงเซิร์ฟเวอร์ ขณะ OBS/ffmpeg เครื่องเดียวกันส่งได้) → ใช้ปลายทาง `SRT: Secure Reliable Transport` แทน: Address `srt://<IP>`, Port 8890, Passphrase, Stream ID `publish:<เวที>:<เวที>:<รหัส>` ผ่านทันที · SRT ของ Wirecast 16.5 มีแค่ 4 ช่องนี้ ไม่มี Latency (ตายตัว 120 ms) เน็ตนิ่งใช้ได้ บน 5G อาจกระตุก → คอมบริษัทบน 5G ให้ใช้ OBS RTMP |
 | OBS | เหมือนเวที X แต่ใช้ key ของ `main` |
 
 กติกาที่ต้องบอก Tlsx:
