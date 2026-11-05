@@ -118,6 +118,29 @@
       <div id="clipMsg" class="err"></div>
       <p class="dim" style="margin:4px 0 0">ปุ่มลัด <kbd>Space</kbd> เล่น/หยุด · <kbd>←</kbd><kbd>→</kbd> ±1 วินาที · <kbd>I</kbd> <kbd>O</kbd> ตั้งจุด · <kbd>L</kbd> ไปที่สด</p>
     </div>
+    <details class="card" id="rpCard">
+      <summary>Replay: ส่งรอบที่จบแล้วออกไลฟ์อีกครั้ง (YouTube / Facebook / RTMP)</summary>
+      <p id="rpRange" class="dim"></p>
+      <div class="row">
+        <select id="rpPreset">
+          <option value="rtmps://a.rtmps.youtube.com:443/live2">YouTube</option>
+          <option value="rtmps://live-api-s.facebook.com:443/rtmp">Facebook</option>
+          <option value="">อื่น ๆ (ใส่ Server เอง)</option>
+        </select>
+        <input class="name" id="rpServer" placeholder="Server เช่น rtmp://…/live" autocomplete="off">
+      </div>
+      <div class="row"><input class="name" id="rpKey" type="password" placeholder="Stream key" autocomplete="off" data-1p-ignore data-lpignore="true"></div>
+      <div class="row">
+        <label><input type="checkbox" id="rpLoop" checked> <span id="rpLoopLabel">วนซ้ำจนกดหยุด</span></label>
+        <label><input type="checkbox" id="rpStopLive" checked> หยุดเองเมื่อเวทีนี้กลับมาไลฟ์</label>
+        <button class="primary" id="rpStart">เริ่มส่ง</button>
+      </div>
+      <div id="rpMsg" class="err"></div>
+      <p class="dim" style="margin:4px 0 0">เซิร์ฟเวอร์ส่งเอง ไม่ต้องเปิด OBS · ไม่เข้ารหัสใหม่ ภาพเท่าต้นฉบับ · ใช้เน็ตขาออกของเซิร์ฟเวอร์เท่าบิตเรตเวที ·
+        ตั้ง In/Out ไว้ = ส่งเฉพาะช่วงนั้น (ตั้งแค่ In = ถึงท้ายรอบ, ตั้งแค่ Out = ตั้งแต่ต้นรอบ; เริ่ม/จบที่รอยต่อท่อน คลาดไม่เกินท่อนละ 2–4 วิ) ไม่ตั้ง = ทั้งรอบ ·
+        รอบที่จบแล้วจะถูกลบตามเวลา "เก็บหลังจบไลฟ์" แต่ replay ที่กำลังส่งอยู่ส่งต่อได้จนกดหยุด</p>
+    </details>
+    <div id="replays"></div>
     <h3>คลิป</h3>
     <table><thead><tr><th>ชื่อ</th><th>ช่วงเวลา</th><th>ยาว</th><th>สถานะ</th><th></th></tr></thead><tbody id="clips"></tbody></table>
   </section>
@@ -227,6 +250,7 @@ function load(stream, session, live, keepMs) {
   hls.attachMedia(v);
   v.play().catch(() => {});
   renderStreams();
+  renderReplayCard();
 }
 function nowMs() { return mediaToMs(v.currentTime); }
 
@@ -267,6 +291,7 @@ function renderPoints() {
   $('tIn').textContent = inMs == null ? 'ยังไม่ตั้ง' : clock(inMs);
   $('tOut').textContent = outMs == null ? 'ยังไม่ตั้ง' : clock(outMs);
   $('clipLen').textContent = inMs != null && outMs != null ? (outMs > inMs ? dur((outMs - inMs) / 1000) : 'Out อยู่ก่อน In') : '-';
+  renderReplayCard();
 }
 function setPoint(which) {
   const ms = nowMs(); if (ms == null) return;
@@ -367,6 +392,8 @@ async function loadState() {
     }
   }
   renderStreams();
+  renderReplays();
+  renderReplayCard();
 }
 // a monitor tab left in the background falls behind (the browser throttles it): catch up on
 // return, but only if it was watching live when hidden, never undoing a pause or a scrub back
@@ -417,6 +444,74 @@ function renderClips(clips) {
     loadClips();
   });
 }
+
+// ---- replay: the server sends an ended round (or its In-Out) out over RTMP ----
+function curSession() {
+  const s = state && cur && state.streams.find((x) => x.name === cur.stream);
+  return (s && s.sessions.find((x) => x.id === cur.session)) || null;
+}
+function renderReplayCard() {
+  const sess = curSession();
+  const why = !cur ? 'เลือกรอบที่จบแล้วทางซ้ายก่อน'
+    : !sess ? 'รอบนี้ไม่มีในบัฟเฟอร์แล้ว'
+    : sess.live ? `รอบนี้ยังไลฟ์อยู่ replay ได้เมื่อรอบนี้จบแล้ว`
+    : !sess.first ? 'รอบนี้ไม่มีภาพ' : null;
+  const a = why ? 0 : Math.max(inMs ?? 0, sess.first * 1000), b = why ? 0 : Math.min(outMs ?? Infinity, sess.last * 1000);
+  const label = inMs != null && outMs != null ? 'ช่วง In–Out' : inMs != null ? 'จาก In ถึงท้ายรอบ'
+    : outMs != null ? 'ต้นรอบถึง Out' : 'ทั้งรอบ';
+  const bad = why || (b <= a ? 'จุด Out อยู่ก่อน In (หรือนอกรอบนี้) ตั้งใหม่ก่อน' : null);
+  $('rpStart').disabled = !!bad;
+  if (bad) { $('rpRange').textContent = bad; return; }
+  $('rpRange').innerHTML = `จะส่ง <b>${esc(cur.stream)}</b> ${label} ${clock(a)}–${clock(b)} · ช่วงที่สัญญาณขาดจะถูกข้าม`;
+}
+const RP = { starting: 'กำลังเชื่อมต่อ', streaming: 'กำลังส่ง', retrying: 'สายหลุด กำลังต่อใหม่',
+  finished: 'เล่นจบแล้ว', stopped: 'หยุดแล้ว', failed: 'ล้มเหลว' };
+function renderReplays() {
+  if (state && state.replay_max_hours) $('rpLoopLabel').textContent = `วนซ้ำจนกดหยุด (หยุดเองเมื่อครบ ${state.replay_max_hours} ชม.)`;
+  const list = (state && state.replays) || [];
+  if (!list.length) { $('replays').innerHTML = ''; return; }
+  // scrolls sideways on a phone: the stop button is the last column
+  $('replays').innerHTML = `<h3>Replay</h3><div style="overflow-x:auto"><table><thead><tr><th>รอบ</th><th>ช่วง</th><th>ปลายทาง</th><th>สถานะ</th><th></th></tr></thead><tbody>${
+    list.map((r) => {
+      const running = !['finished', 'stopped', 'failed'].includes(r.status);
+      const cls = r.status === 'streaming' ? 'st-done' : r.status === 'failed' ? 'st-failed' : running ? 'st-run' : 'dim';
+      let info = '';
+      if (r.status === 'streaming' && r.run_started) {
+        const el = Math.max(0, state.now - r.run_started);
+        const at = r.loop ? (r.run_from + el) % r.pass_seconds : Math.min(r.run_from + el, r.pass_seconds);
+        info = `ตำแหน่ง ${dur(at)} / ${dur(r.pass_seconds)} · ส่งออกไปแล้ว ${dur(r.streamed + el)}`;
+      } else if (r.streamed) info = `ส่งออกไปแล้ว ${dur(r.streamed)}`;
+      return `<tr><td>${esc(r.stream)}<br><small class="dim">${esc(r.session)}</small></td>
+        <td>${r.t_in ? clock(r.t_in * 1000) + '–' + clock(r.t_out * 1000) : ''}<br><small class="dim">${r.pass_seconds ? dur(r.pass_seconds) : ''}${r.loop ? ' · วนซ้ำ' : ''}</small></td>
+        <td>${esc(r.dest || '')}</td>
+        <td class="${cls}">${RP[r.status] || esc(r.status)}${info ? `<br><small class="dim">${info}</small>` : ''}
+          ${r.reason ? `<div class="dim">${esc(r.reason)}</div>` : ''}${r.error && ['failed', 'retrying', 'starting'].includes(r.status) ? `<div class="err">${esc(r.error)}</div>` : ''}</td>
+        <td>${running ? `<button data-rpstop="${esc(r.id)}">หยุด</button>` : ''}</td></tr>`;
+    }).join('')}</tbody></table></div>`;
+  $('replays').querySelectorAll('[data-rpstop]').forEach((b) => b.onclick = async () => {
+    if (!confirm('หยุดส่ง replay นี้?')) return;
+    b.disabled = true;
+    try { await api(`/api/replays/${b.dataset.rpstop}/stop`, {}); } catch (e) { alert(e.message); }
+    loadState();
+  });
+}
+$('rpServer').value = $('rpPreset').value;
+$('rpPreset').onchange = () => { $('rpServer').value = $('rpPreset').value; $('rpServer').focus(); };
+$('rpStart').onclick = async () => {
+  const msg = $('rpMsg'); msg.textContent = '';
+  const sess = curSession();
+  if (!sess || sess.live) return renderReplayCard();
+  $('rpStart').disabled = true;
+  try {
+    await api('/api/replays', { stream: cur.stream, session: cur.session,
+      t_in: inMs != null ? inMs / 1000 : null, t_out: outMs != null ? outMs / 1000 : null,
+      server: $('rpServer').value.trim(), key: $('rpKey').value.trim(),
+      loop: $('rpLoop').checked, stop_when_live: $('rpStopLive').checked });
+    $('rpKey').value = '';
+    await loadState();
+  } catch (e) { msg.textContent = e.message; }
+  finally { renderReplayCard(); }
+};
 
 renderPoints();
 loadState(); setInterval(loadState, 4000);

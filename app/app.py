@@ -8,16 +8,19 @@ Stdlib HTTP server on purpose: a handful of editors, one process. See README.md.
 import base64
 import gzip
 import hmac
+import ipaddress
 import json
 import logging
 import os
 import re
 import shutil
+import socket
 import subprocess
 import threading
 import time
 import urllib.request
 import uuid
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -277,6 +280,7 @@ def build_state():
     du = shutil.disk_usage(DATA)
     with LOCK:
         warnings = list(WARNINGS.values())
+    replays = load_replays()
     return {
         'now': now, 'streams': out, 'warnings': warnings,
         'settings': {k: get_setting(k) for k in DEFAULTS}, 'limits': LIMITS,
@@ -284,6 +288,10 @@ def build_state():
         'storage': 'wasabi' if S3_ON else 'local',
         'srt': {'host': SRT_PUBLIC_HOST, 'port': SRT_PUBLIC_PORT},
         'ingest': INGEST_HELP,
+        # every running replay (its row holds the only stop button), then the latest finished ones
+        'replays': [r for r in replays if r.get('status') not in REPLAY_FINAL]
+                   + [r for r in replays if r.get('status') in REPLAY_FINAL][:20],
+        'replay_max': REPLAY_MAX, 'replay_max_hours': REPLAY_MAX_HOURS,
     }
 
 
@@ -590,6 +598,352 @@ def recover_interrupted():
                         error='แอปรีสตาร์ทระหว่างทำงาน กด "ลองใหม่"')
 
 
+# ---------- replay: send an ended round back out over RTMP, the way OBS plays a file ----------
+# One ffmpeg per replay, -re -c copy: no re-encode (CPU ~10% of a core, same picture), one stage's
+# bitrate on the VM's uplink. Copy can only start on a keyframe, so a range snaps to whole segments.
+# A loop is one connection (-stream_loop): reconnecting would look like "stream ended" to YouTube.
+
+REPLAYS = DATA / 'replay'        # <id>.json (never the stream key) + <id>/ hard links to the segments
+REPLAY_MAX = int(os.environ.get('REPLAY_MAX', '2'))
+REPLAY_MAX_HOURS = float(os.environ.get('REPLAY_MAX_HOURS', '12'))  # a forgotten loop stops itself
+# hosts allowed although they resolve to a private address (an RTMP server on the office LAN)
+REPLAY_ALLOW_HOSTS = {h.strip() for h in os.environ.get('REPLAY_ALLOW_HOSTS', '').split(',') if h.strip()}
+REPLAY_FFMPEG = ['ffmpeg']       # test_replay.py swaps in a fake
+REPLAY_STEADY = 30               # seconds of picture sent before a drop counts as a blip, not a refusal
+REPLAY_RETRY_WAIT = 5
+REPLAY_REWIND = 5                # resume this far before the last second handed to the network
+REPLAY_FINAL = ('finished', 'stopped', 'failed')
+REPLAY_LOCK = threading.Lock()   # guards REPLAY_RUN
+REPLAY_RUN = {}                  # id -> {rec, dest, key, stop, proc, reason} while its thread runs
+PROGRESS_RE = re.compile(r'^[a-z_0-9]+=\S*$')   # ffmpeg -progress lines, mixed into stderr
+
+
+def host_addrs(host):
+    return {ai[4][0] for ai in socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)}
+
+
+def replay_dest(server, key):
+    """OBS-style Server + Stream key -> (URL for ffmpeg, what the page may show). rtmp(s) to a
+    public address only: a web login must not be able to make the VM probe the docker network,
+    the office LAN or a metadata address (the error text would tell what answers where)."""
+    server, key = str(server or '').strip(), str(key or '').strip()
+    m = re.match(r'^(rtmps?)://([A-Za-z0-9.-]+)(:\d{1,5})?(/\S*)?$', server)
+    if not m:
+        raise BadRequest('Server ต้องเป็น rtmp://… หรือ rtmps://… เช่น rtmps://a.rtmps.youtube.com:443/live2')
+    if not key or len(key) > 512 or any(c.isspace() for c in key):
+        raise BadRequest('ใส่ Stream key (ห้ามมีช่องว่าง)')
+    host = m[2]
+    if host not in REPLAY_ALLOW_HOSTS:
+        try:
+            addrs = host_addrs(host)
+        except OSError:
+            raise BadRequest(f'หาเครื่อง {host} ไม่เจอ ตรวจชื่อใน Server อีกครั้ง')
+        if not addrs or any(not ipaddress.ip_address(a.split('%')[0]).is_global for a in addrs):
+            raise BadRequest(f'{host} ไม่ใช่ที่อยู่บนอินเทอร์เน็ต ส่ง replay ได้เฉพาะปลายทางภายนอก')
+    return server.rstrip('/') + '/' + key, f'{m[1]}://{host}{m[3] or ""}'
+
+
+def redact(line, key):
+    """ffmpeg prints the destination, key included, on most errors."""
+    line = re.sub(r'rtmps?://\S*', '<ปลายทาง>', line)
+    return line.replace(key, '***') if len(key) >= 4 else line
+
+
+def replay_segments(segs, t_in=None, t_out=None):
+    """Whole segments covering t_in..t_out of an ENDED round (None = that end of the round). A
+    point past either end is clamped: the round will not grow, so "wait and retry" would lie."""
+    if not segs:
+        raise ClipError('รอบนี้ยังไม่มีภาพ')
+    t_in = segs[0].start if t_in is None else max(t_in, segs[0].start)
+    t_out = segs[-1].end if t_out is None else min(t_out, segs[-1].end)
+    chosen = plan_cut(segs, t_in, t_out)[0]
+    if sum(s.dur for s in chosen) < 1:
+        raise ClipError('ช่วงที่เลือกสั้นเกินไป')
+    return chosen
+
+
+def stream_params(path):
+    r = subprocess.run(['ffprobe', '-v', 'error', '-show_entries',
+                        'stream=codec_type,codec_name,width,height,sample_rate,channels', '-of', 'json', str(path)],
+                       capture_output=True, text=True, timeout=15)
+    if r.returncode != 0:
+        raise ClipError(f'อ่านไฟล์ {path.name} ไม่ได้: {r.stderr.strip()[-200:]}')
+    return sorted(json.dumps(s, sort_keys=True) for s in json.loads(r.stdout).get('streams', []))
+
+
+def replay_check_joins(d, segs):
+    """dvr.sh continues a round when an encoder rejoins within RECONNECT_MIN, maybe a backup with
+    other settings. Copy mode sends the first part's audio/video setup for the whole stream, so a
+    different resolution or audio format after a join would play broken while the page says OK."""
+    first = None
+    for prev, s in zip([None] + segs[:-1], segs):
+        if prev is not None and s.start <= prev.end + 1:
+            continue
+        p = stream_params(d / s.name)
+        if first is None:
+            first = p
+        elif p != first:
+            raise ClipError(f'เครื่องส่งต่อเข้ามาใหม่ตอน {fmt_time(s.start)} ด้วยภาพ/เสียงคนละแบบกับช่วงก่อน '
+                            'ส่งรวดเดียวไม่ได้ ตั้ง In/Out แยกเป็นก่อนและหลังเวลานั้น')
+
+
+def replay_index(segs, pos):
+    """(index, start in seconds) of the segment that plays at `pos` seconds into the range."""
+    acc = 0.0
+    for i, s in enumerate(segs):
+        if acc + s.dur > pos:
+            return i, acc
+        acc += s.dur
+    return 0, 0.0
+
+
+def replay_concat(segs, start, loop):
+    """ffconcat for one pass from segment `start`: to the end of the range, or (loop) round to it
+    again. A loop has no beginning, so starting it mid-range changes nothing on air."""
+    order = segs[start:] + (segs[:start] if loop else [])
+    lines = ['ffconcat version 1.0']
+    for s in order:
+        lines += [f"file '{s.name}'", f'duration {s.dur:.6f}']
+    return '\n'.join(lines) + '\n'
+
+
+def save_replay(rec):
+    """Only the replay's own thread writes after creation (the janitor only after it is gone)."""
+    tmp = REPLAYS / f'{rec["id"]}.json.tmp'
+    tmp.write_text(json.dumps(rec, ensure_ascii=False))
+    tmp.replace(REPLAYS / f'{rec["id"]}.json')
+
+
+def update_replay(rec, **fields):
+    rec.update(fields)
+    save_replay(rec)
+
+
+def load_replays():
+    out = []
+    for p in REPLAYS.glob('*.json'):
+        try:
+            out.append(json.loads(p.read_text()))
+        except (OSError, ValueError) as e:
+            out.append({'id': p.stem, 'status': 'failed', 'created': 0, 'error': f'อ่านข้อมูล replay ไม่ได้: {e}'})
+    return sorted(out, key=lambda r: r.get('created', 0), reverse=True)
+
+
+def create_replay(body):
+    stream, session = body.get('stream'), body.get('session')
+    d = session_dir(stream, session)
+    if time.time() - (d / 'index.m3u8').stat().st_mtime < LIVE_SECONDS:
+        raise ClipError('รอบนี้ยังไลฟ์อยู่ replay ได้เมื่อเวทีจบแล้ว')
+    try:
+        t_in = None if body.get('t_in') is None else float(body['t_in'])
+        t_out = None if body.get('t_out') is None else float(body['t_out'])
+    except (TypeError, ValueError):
+        raise BadRequest('t_in / t_out ต้องเป็นตัวเลขวินาที')
+    stop_when_live = bool(body.get('stop_when_live', True))
+    dest, shown = replay_dest(body.get('server'), body.get('key'))
+    segs = replay_segments(read_segments(d), t_in, t_out)
+    if stop_when_live and ((mediamtx_paths() or {}).get(stream) or {}).get('ready'):
+        raise ClipError(f'เวที {stream} ไลฟ์อยู่ตอนนี้ ถ้าติ๊ก "หยุดเองเมื่อเวทีนี้กลับมาไลฟ์" replay จะหยุดทันที '
+                        'เอาติ๊กออกถ้าปลายทางนี้ไม่ใช่ช่องเดียวกับไลฟ์')
+    replay_check_joins(d, segs)
+    rid = uuid.uuid4().hex
+    rec = {'id': rid, 'stream': stream, 'session': session, 't_in': segs[0].start, 't_out': segs[-1].end,
+           'pass_seconds': round(sum(s.dur for s in segs), 3), 'loop': bool(body.get('loop')),
+           'stop_when_live': stop_when_live, 'dest': shown,
+           'status': 'starting', 'created': time.time(), 'run_started': None, 'run_from': 0.0,
+           'streamed': 0.0, 'error': None, 'reason': None, 'ended': None}
+    run = {'rec': rec, 'dest': dest, 'key': str(body.get('key')).strip(), 'stop': threading.Event(),
+           'proc': None, 'reason': None}
+    with REPLAY_LOCK:
+        if len(REPLAY_RUN) >= REPLAY_MAX:
+            raise ClipError(f'ส่ง replay พร้อมกันได้ไม่เกิน {REPLAY_MAX} ช่อง (แต่ละช่องใช้เน็ตขาออกเท่าบิตเรตเวที) หยุดอันเก่าก่อน')
+        if any(r['dest'] == dest for r in REPLAY_RUN.values()):
+            raise ClipError('มี replay ส่งไป Server + Stream key นี้อยู่แล้ว สองตัวบนคีย์เดียวกันจะเตะกันเอง')
+        REPLAY_RUN[rid] = run
+    work, saved = REPLAYS / rid, False
+    try:
+        work.mkdir(parents=True)
+        # hard links: the janitor may delete the round (keep_hours) while a loop is still on air
+        for s in segs:
+            try:
+                os.link(d / s.name, work / s.name)
+            except FileNotFoundError:
+                raise ClipError('ภาพบางท่อนในช่วงนี้หลุดบัฟเฟอร์ไปแล้ว เลือกช่วงใหม่')
+            except OSError:
+                shutil.copy2(d / s.name, work / s.name)
+        save_replay(rec)
+        saved = True
+        threading.Thread(target=run_replay, args=(rid, segs), daemon=True, name=f'replay-{rid[:8]}').start()
+    except BaseException:
+        shutil.rmtree(work, ignore_errors=True)
+        with REPLAY_LOCK:
+            REPLAY_RUN.pop(rid, None)
+        if saved:  # never leave a record saying "starting" that no thread will move on
+            try:
+                update_replay(rec, status='failed', ended=time.time(), error='เริ่ม replay ไม่ได้ ดู log ของ web')
+            except OSError:
+                pass
+        raise
+    return rec
+
+
+def run_replay(rid, segs):
+    run = REPLAY_RUN[rid]
+    rec, work, pass_s = run['rec'], REPLAYS / rid, run['rec']['pass_seconds']
+    pos, ok_once, quick = 0.0, False, 0   # pos: seconds into the range where this ffmpeg starts
+    try:
+        while not run['stop'].is_set():
+            start, pos = replay_index(segs, pos)
+            (work / 'list.ffconcat').write_text(replay_concat(segs, start, rec['loop']))
+            want = None if rec['loop'] else pass_s - pos
+            # ffmpeg 8 checks no TLS certificate unless told to (see cloud/rtmp/youtube.sh)
+            tls = ['-tls_verify', '1'] if run['dest'].startswith('rtmps://') else []
+            loop = ['-stream_loop', '-1'] if rec['loop'] else []
+            cmd = REPLAY_FFMPEG + ['-nostdin', '-hide_banner', '-loglevel', 'warning', '-progress', 'pipe:2',
+                                   *loop, '-re', '-f', 'concat', '-i', 'list.ffconcat', '-map', '0:v?',
+                                   '-map', '0:a?', '-c', 'copy', '-f', 'flv', *tls, '-rw_timeout', '10000000',
+                                   run['dest']]
+            update_replay(rec, status='starting', run_started=None, run_from=pos)   # connecting
+            proc = subprocess.Popen(cmd, cwd=work, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.PIPE, text=True, errors='replace')
+            run['proc'] = proc
+            if run['stop'].is_set():  # stop pressed while this ffmpeg was starting
+                proc.terminate()
+            tail = deque(maxlen=4)    # the cause is a few lines up: the last says only "I/O error"
+            sent = 0.0                # seconds of the range ffmpeg has handed to the network
+            for line in proc.stderr:
+                line = line.strip()
+                if PROGRESS_RE.match(line):
+                    k, _, v = line.partition('=')
+                    if k == 'out_time_us' and v.isdigit():
+                        if not sent and int(v):
+                            # progress comes only after the output opened: the RTMP server took
+                            # the publish and picture is leaving. Not before: no "sending" on a hope.
+                            update_replay(rec, status='streaming', error=None,
+                                          run_started=time.time() - int(v) / 1e6)
+                        sent = int(v) / 1e6
+                    continue
+                line = redact(line, run['key'])
+                if line:
+                    tail.append(line[-200:])
+                    log.info('replay %s: %s', rid[:8], line[-300:])
+            rc = proc.wait()
+            rec['streamed'] = round(rec['streamed'] + sent, 1)
+            if run['stop'].is_set():
+                break
+            if want is not None and rc == 0 and sent >= want - 3:
+                update_replay(rec, status='finished', run_started=None, ended=time.time())
+                return
+            # anything else is a drop: a loop never ends by itself; a pass that ended short did not finish
+            if rc == 0:
+                err = f'ffmpeg หยุดก่อนครบ (ส่งไป {sent:.0f} วิ)'
+            else:
+                err = ' / '.join(tail) or f'ffmpeg จบด้วยรหัส {rc}'
+            ok_once = ok_once or sent > 0                     # the destination took this key once
+            quick = 0 if sent >= REPLAY_STEADY else quick + 1
+            if not ok_once or quick >= 3:
+                hint = ('ส่งไม่ขึ้นตั้งแต่แรก: ตรวจ Server กับ Stream key และว่าปลายทางเปิดรับไลฟ์แล้ว'
+                        if not ok_once else 'สายหลุดซ้ำ 3 ครั้งติด')
+                update_replay(rec, status='failed', error=f'{hint} ({err})', run_started=None, ended=time.time())
+                return
+            nxt = pos + max(0.0, sent - REPLAY_REWIND)
+            # one pass never wraps back to the start: at worst its last segment goes out again
+            pos = nxt % pass_s if rec['loop'] else min(nxt, pass_s - segs[-1].dur)
+            update_replay(rec, status='retrying', error=err, run_started=None)
+            run['stop'].wait(REPLAY_RETRY_WAIT)
+        update_replay(rec, status='stopped', reason=run['reason'], run_started=None, ended=time.time())
+    except Exception as e:  # noqa: BLE001 - recorded on the replay, never left "streaming"
+        log.exception('replay %s crashed', rid[:8])
+        try:
+            update_replay(rec, status='failed', error=f'{type(e).__name__}: {e}', run_started=None,
+                          ended=time.time())
+        except OSError:
+            pass  # disk full: the janitor marks it failed once it can write again
+    finally:
+        proc = run.get('proc')
+        if proc and proc.poll() is None:
+            proc.kill()
+        shutil.rmtree(work, ignore_errors=True)
+        with REPLAY_LOCK:
+            REPLAY_RUN.pop(rid, None)
+
+
+def stop_replay(rid, reason='มีคนกดหยุด'):
+    with REPLAY_LOCK:
+        run = REPLAY_RUN.get(rid)
+    if not run:
+        raise BadRequest('replay นี้ไม่ได้ส่งอยู่แล้ว')
+    run['reason'] = reason
+    run['stop'].set()
+    proc = run.get('proc')
+    if proc and proc.poll() is None:
+        proc.terminate()  # rtmp output: ffmpeg closes the stream cleanly; kill if it hangs
+        threading.Timer(15, lambda: proc.poll() is None and proc.kill()).start()
+    return run['rec']
+
+
+def replay_watch_once(now=None):
+    """Stops a replay that has been on air REPLAY_MAX_HOURS (a loop nobody remembered eats the
+    VM's traffic allowance), and one whose stage is back on air (two feeds on one key fight)."""
+    now = now or time.time()
+    with REPLAY_LOCK:
+        runs = [(rid, r['rec']) for rid, r in REPLAY_RUN.items() if not r['stop'].is_set()]
+    for rid, rec in runs:
+        on_air = rec['streamed'] + (now - rec['run_started'] if rec.get('run_started') else 0)
+        if on_air > REPLAY_MAX_HOURS * 3600:
+            try:
+                stop_replay(rid, f'ส่งครบ {REPLAY_MAX_HOURS:g} ชม. หยุดให้เอง (ค่า REPLAY_MAX_HOURS)')
+            except BadRequest:
+                pass  # it ended by itself in between
+    runs = [(rid, rec) for rid, rec in runs if rec['stop_when_live']]
+    if not runs:
+        return
+    paths = mediamtx_paths()
+    if paths is None:
+        return  # cannot tell (a warning is already up): keep sending rather than guess
+    for rid, rec in runs:
+        if (paths.get(rec['stream']) or {}).get('ready'):
+            try:
+                stop_replay(rid, f'เวที {rec["stream"]} กลับมาไลฟ์ หยุด replay ให้เอง')
+            except BadRequest:
+                pass
+
+
+def replay_watch_loop():
+    while True:
+        try:
+            replay_watch_once()
+        except Exception:  # noqa: BLE001
+            log.exception('replay watch failed')
+        time.sleep(5)
+
+
+def recover_replays():
+    """At startup nothing is sending: a record still 'streaming' died with the old process."""
+    for rec in load_replays():
+        if rec.get('status') not in REPLAY_FINAL:
+            update_replay(rec, status='failed', run_started=None, ended=time.time(),
+                          error='แอปรีสตาร์ทระหว่างส่ง replay กดเริ่มใหม่ (ใส่ Stream key อีกครั้ง)')
+    for d in REPLAYS.glob('*'):
+        if d.is_dir():
+            shutil.rmtree(d, ignore_errors=True)
+
+
+def janitor_replays(now):
+    with REPLAY_LOCK:
+        running = set(REPLAY_RUN)
+    for rec in load_replays():
+        p = REPLAYS / f'{rec["id"]}.json'
+        if rec.get('status') in REPLAY_FINAL:   # finished replays stay listed for a day
+            when = rec.get('ended') or rec.get('created') or (p.stat().st_mtime if p.exists() else now)
+            if now - when > 24 * 3600:
+                p.unlink(missing_ok=True)
+        elif rec['id'] not in running and p.exists() and now - p.stat().st_mtime > 120:
+            # its thread is gone without writing an end (disk was full): say so, never "sending"
+            update_replay(rec, status='failed', run_started=None, ended=now,
+                          error='replay หยุดกลางคันโดยไม่ได้บันทึกผล ดู log ของ web')
+
+
 # ---------- janitor ----------
 
 def janitor_once(now=None):
@@ -643,6 +997,7 @@ def janitor_once(now=None):
     for t in CLIPS.glob('tmp-*'):
         if t.name[4:] not in running and now - t.stat().st_mtime > 6 * 3600:
             shutil.rmtree(t, ignore_errors=True)
+    janitor_replays(now)
 
     # disk guard: the volume shares a host with other services; never let it fill up
     free_gb = shutil.disk_usage(DATA).free / 1e9
@@ -654,7 +1009,8 @@ def janitor_once(now=None):
         EARLY.append((now, f'{d.parent.name}/{d.name}'))
         free_gb = shutil.disk_usage(DATA).free / 1e9
     if free_gb < MIN_FREE_GB:
-        set_warning('disk', f'พื้นที่ดิสก์เหลือ {free_gb:.1f} GB ต่ำกว่า {MIN_FREE_GB:.0f} GB ลดบัฟเฟอร์หรือเพิ่มดิสก์')
+        held = f' (replay {len(REPLAY_RUN)} ตัวที่กำลังส่งถือไฟล์ของรอบที่เล่นไว้ หยุดแล้วพื้นที่จะคืน)' if REPLAY_RUN else ''
+        set_warning('disk', f'พื้นที่ดิสก์เหลือ {free_gb:.1f} GB ต่ำกว่า {MIN_FREE_GB:.0f} GB ลดบัฟเฟอร์หรือเพิ่มดิสก์{held}')
     else:
         set_warning('disk', None)
     EARLY[:] = [e for e in EARLY if now - e[0] < 6 * 3600]
@@ -811,6 +1167,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self.json(create_clip(body), 201)
             if len(parts) == 4 and parts[:2] == ['api', 'clips'] and parts[3] == 'retry':
                 return self.json(retry_clip(parts[2]))
+            if path == '/api/replays':
+                return self.json(create_replay(body), 201)
+            if len(parts) == 4 and parts[:2] == ['api', 'replays'] and parts[3] == 'stop':
+                if not CLIP_ID_RE.match(parts[2]):
+                    raise BadRequest('รหัส replay ไม่ถูกต้อง')
+                return self.json(stop_replay(parts[2]))
             if path == '/api/settings':
                 for key in DEFAULTS:
                     if key in body:
@@ -842,10 +1204,12 @@ def check_config():
 def main():
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
     check_config()
-    for d in (DVR, CLIPS, SETTINGS):
+    for d in (DVR, CLIPS, SETTINGS, REPLAYS):
         d.mkdir(parents=True, exist_ok=True)
     recover_interrupted()
+    recover_replays()
     threading.Thread(target=janitor_loop, daemon=True).start()
+    threading.Thread(target=replay_watch_loop, daemon=True).start()
     port = int(os.environ.get('PORT', '8080'))
     log.info('live-clip on :%d, storage=%s', port, 'wasabi' if S3_ON else 'local only')
     ThreadingHTTPServer(('0.0.0.0', port), Handler).serve_forever()
