@@ -205,7 +205,8 @@ function load(stream, session, live, keepMs) {
   $('nowPlaying').innerHTML = `<b>${esc(stream)}</b> · รอบ ${esc(session)} ${status}`;
   if (hls) hls.destroy();
   if (!window.Hls || !Hls.isSupported()) { $('playerMsg').textContent = 'เบราว์เซอร์นี้เล่น HLS ไม่ได้ ใช้ Chrome/Edge/Firefox/Safari รุ่นใหม่'; return; }
-  hls = new Hls({ liveSyncDurationCount: 3, maxBufferLength: 30, backBufferLength: 90 });
+  // 20 s behind live: at 3 segments (6 s on xstage) a congested link froze the live picture (4 Nov 2026)
+  hls = new Hls({ liveSyncDuration: 20, maxBufferLength: 30, backBufferLength: 90 });
   hls.on(Hls.Events.ERROR, (_, d) => {
     if (!d.fatal) return;
     $('playerMsg').textContent = `เล่นไม่ได้: ${d.type} / ${d.details}`;
@@ -373,7 +374,7 @@ let hiddenAtLive = false;
 document.addEventListener('visibilitychange', () => {
   if (!FOLLOW) return;
   const r = seekRange();
-  if (document.hidden) { hiddenAtLive = !!(cur && cur.live && r && !v.paused && r[1] - v.currentTime < 12); return; }
+  if (document.hidden) { hiddenAtLive = !!(cur && cur.live && r && !v.paused && r[1] - v.currentTime < 30); return; }
   loadState();
   if (hiddenAtLive && cur && cur.live) $('toLive').click();
 });
