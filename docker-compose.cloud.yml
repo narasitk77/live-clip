@@ -72,6 +72,9 @@ services:
       MIN_FREE_GB: ${MIN_FREE_GB:-20}
       LOCAL_CLIP_HOURS: ${LOCAL_CLIP_HOURS:-24}
       CUT_WORKERS: ${CUT_WORKERS:-2}
+      REPLAY_MAX: ${REPLAY_MAX:-2}
+      REPLAY_MAX_HOURS: ${REPLAY_MAX_HOURS:-12}
+      REPLAY_ALLOW_HOSTS: ${REPLAY_ALLOW_HOSTS:-}
     volumes:
       - data:/data
 
