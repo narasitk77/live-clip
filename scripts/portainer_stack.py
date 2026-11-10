@@ -14,7 +14,7 @@ old IMAGE_TAG returns 200 and changes nothing; that bit us on probook).
 import json, os, sys, time, urllib.parse, urllib.request
 
 STACK, REPO, COMPOSE = 'live-clip', 'https://github.com/narasitk77/live-clip', 'docker-compose.portainer.yml'
-SECRET_KEYS = {'SRT_PASSPHRASE', 'WEB_PASSWORD', 'MEDIAMTX_API_PASS', 'S3_SECRET_KEY', 'S3_ACCESS_KEY'}
+SECRET_KEYS = {'SRT_PASSPHRASE', 'WEB_PASSWORD', 'MEDIAMTX_API_PASS', 'S3_SECRET_KEY', 'S3_ACCESS_KEY', 'RESTREAM_PIN'}
 
 
 def read_env(path):

@@ -4,7 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Live Clip</title>
-<script src="https://cdn.jsdelivr.net/npm/hls.js@1.7.3/dist/hls.min.js"></script>
+<!-- the version in the URL and the integrity hash change together -->
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1.7.3/dist/hls.min.js"
+        integrity="sha384-cciJ0zi8d1uMKC2zJd7jvPY4HQt7W4ByUI/FlMkltvBi31aW61rcpVBhpmW8/NwX" crossorigin="anonymous"></script>
 <style>
   :root { --bg:#111418; --panel:#1a1f26; --line:#2a313b; --text:#e6e9ee; --dim:#8b95a3;
           --accent:#4f9dff; --live:#ff4d4f; --ok:#3ecf8e; --warn:#f5a524; --in:#3ecf8e; --out:#ff7a45; }
@@ -58,6 +60,7 @@
   <span class="chip" id="storage"></span>
   <span class="chip" id="disk"></span>
   <span class="chip" id="buffer"></span>
+  <span class="chip" id="rsChip" hidden style="background:var(--live); border-color:var(--live); color:#fff; font-weight:600"></span>
 </header>
 <div id="warnings"></div>
 <main>
@@ -141,6 +144,49 @@
         รอบที่จบแล้วจะถูกลบตามเวลา "เก็บหลังจบไลฟ์" แต่ replay ที่กำลังส่งอยู่ส่งต่อได้จนกดหยุด</p>
     </details>
     <div id="replays"></div>
+    <details class="card" id="rsCard">
+      <summary>Restream: ส่งเวทีสดออกหลายช่องพร้อมกัน (YouTube / Facebook / TikTok)</summary>
+      <p id="rsOff" class="err" hidden></p>
+      <div id="rsBody">
+        <p id="rsStale" class="err" hidden></p>
+        <div class="row">
+          <span>เวที</span> <select id="rsStage"></select> <button id="rsNewStage" title="เตรียมปลายทางให้เวทีที่ยังไม่เคยมีสัญญาณ">+ เวที</button>
+          <span id="rsSource" class="dim"></span>
+          <button class="primary" id="rsStartAll">เริ่มส่งทุกช่อง</button>
+          <button id="rsStopAll">หยุดทุกช่อง</button>
+        </div>
+        <div id="rsNotes" class="err"></div>
+        <div style="overflow-x:auto"><table style="min-width:620px">
+          <thead><tr><th>ช่อง</th><th>ปลายทาง</th><th>สถานะ</th><th></th></tr></thead>
+          <tbody id="rsRows"></tbody>
+        </table></div>
+        <div id="rsMsg" class="err"></div>
+        <div class="row"><button id="rsAdd">+ เพิ่มปลายทาง</button></div>
+        <div id="rsForm" hidden class="card" style="background:var(--bg)">
+          <div class="row"><b id="rsFormTitle"></b></div>
+          <div class="row">
+            <select id="rsPreset">
+              <option value="YouTube|rtmps://a.rtmps.youtube.com:443/live2">YouTube</option>
+              <option value="Facebook|rtmps://live-api-s.facebook.com:443/rtmp">Facebook</option>
+              <option value="TikTok|">TikTok (วาง Server URL ใหม่ทุกไลฟ์)</option>
+              <option value="|">อื่น ๆ (ใส่ Server เอง)</option>
+            </select>
+            <input class="name" id="rsName" placeholder="ชื่อช่อง เช่น YouTube public" maxlength="60">
+          </div>
+          <div class="row"><input class="name" id="rsServer" placeholder="Server เช่น rtmps://…/live2" autocomplete="off"></div>
+          <div class="row"><input class="name" id="rsKey" type="password" placeholder="Stream key" autocomplete="off" data-1p-ignore data-lpignore="true"></div>
+          <div class="row"><button class="primary" id="rsSave">บันทึก</button> <button id="rsCancel">ยกเลิก</button>
+            <span id="rsFormMsg" class="err"></span></div>
+          <p class="dim" id="rsPresetNote" style="margin:4px 0 0"></p>
+          <p class="dim" style="margin:4px 0 0">Stream key ถูกเก็บไว้บนเซิร์ฟเวอร์เพื่อให้ต่อกลับเองได้ และจะไม่ถูกแสดงกลับมาอีก (เห็นแค่ 4 ตัวท้ายไว้แยกช่อง) ·
+            ถ้าเปลี่ยน Server ต้องใส่ key ใหม่ด้วย</p>
+        </div>
+        <p class="dim" style="margin:6px 0 0"><b>"ส่งถึงปลายทางแล้ว" แปลว่าเซิร์ฟเวอร์ของแพลตฟอร์มรับสัญญาณแล้ว ระบบนี้มองไม่เห็นว่าคนดูเห็นหรือยัง</b> ต้องเปิดดูที่แพลตฟอร์มทุกครั้ง ·
+          ถ้าเครื่องส่งของเวทีหลุด ทุกช่องจะรอและส่งต่อเองเมื่อภาพกลับมาภายใน <span id="rsWindow">10</span> นาที เกินนั้นระบบหยุดและปลดช่องให้เอง ·
+          จบรายการ: กดจบไลฟ์ที่แพลตฟอร์มก่อน แล้วกด "หยุดทุกช่อง" ที่นี่ · เซิร์ฟเวอร์ส่งภาพเดียวกับที่เวทีส่งเข้ามา ไม่แปลงขนาดหรือแนวภาพ</p>
+        <details style="margin-top:6px"><summary>เหตุการณ์ล่าสุดของเวทีนี้</summary><div id="rsLog" class="dim" style="font-size:12px; white-space:pre-wrap"></div></details>
+      </div>
+    </details>
     <h3>คลิป</h3>
     <table><thead><tr><th>ชื่อ</th><th>ช่วงเวลา</th><th>ยาว</th><th>สถานะ</th><th></th></tr></thead><tbody id="clips"></tbody></table>
   </section>
@@ -177,10 +223,17 @@ if (FOLLOW) {
 }
 
 async function api(path, body) {
-  const r = await fetch(ORIGIN + path, body === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  // reads give up after 10 s (a hung poll would leave old green rows on screen); actions may take longer
+  const ctl = body === undefined ? new AbortController() : null;
+  const timer = ctl && setTimeout(() => ctl.abort(), 10000);
+  let r;
+  try {
+    r = await fetch(ORIGIN + path, body === undefined ? { signal: ctl.signal } : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  } catch (e) { throw new Error(e.name === 'AbortError' ? 'เซิร์ฟเวอร์ไม่ตอบใน 10 วินาที' : e.message); }
+  finally { clearTimeout(timer); }
   // a body that doesn't parse is an error, never "no data" (it would read as an empty list)
   const data = await r.json().catch(() => { throw new Error(`HTTP ${r.status}: อ่านคำตอบจากเซิร์ฟเวอร์ไม่ได้`); });
-  if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+  if (!r.ok) throw Object.assign(new Error(data.error || `HTTP ${r.status}`), { status: r.status, pin: !!data.pin });
   return data;
 }
 
@@ -221,13 +274,18 @@ function load(stream, session, live, keepMs) {
     inMs = outMs = null; renderPoints();
     $('clipMsg').textContent = `ล้างจุด In/Out แล้ว เพราะเปลี่ยนไปรอบ ${session} (คลิปจากรอบเดิม: กดรอบนั้นทางซ้ายแล้วตั้งจุดใหม่)`;
   }
+  const moved = !cur || cur.stream !== stream;   // the 4 s poll reloads the same stage: that must not move the card
   cur = { stream, session, live };
+  if (moved && [...$('rsStage').options].some((o) => o.value === stream) && $('rsStage').value !== stream && $('rsForm').hidden) {
+    $('rsStage').value = stream; $('rsMsg').textContent = ''; renderRestream();
+  }
   $('playerMsg').textContent = '';
   const status = live ? '<span class="live-badge">LIVE</span>'
     : stream === FOLLOW ? '<span class="dim">ไม่มีสัญญาณเข้า · ภาพสดจะกลับมาเองเมื่อเครื่องส่งต่อใหม่</span>' : '<span class="dim">จบแล้ว</span>';
   $('nowPlaying').innerHTML = `<b>${esc(stream)}</b> · รอบ ${esc(session)} ${status}`;
   if (hls) hls.destroy();
-  if (!window.Hls || !Hls.isSupported()) { $('playerMsg').textContent = 'เบราว์เซอร์นี้เล่น HLS ไม่ได้ ใช้ Chrome/Edge/Firefox/Safari รุ่นใหม่'; return; }
+  if (!window.Hls) { $('playerMsg').textContent = 'โหลดตัวเล่นวิดีโอ (hls.js) ไม่ได้: CDN ถูกบล็อก หรือไฟล์ไม่ตรงกับ integrity ที่ระบุ แจ้งผู้ดูแล'; return; }
+  if (!Hls.isSupported()) { $('playerMsg').textContent = 'เบราว์เซอร์นี้เล่น HLS ไม่ได้ ใช้ Chrome/Edge/Firefox/Safari รุ่นใหม่'; return; }
   // 20 s behind live: at 3 segments (6 s on xstage) a congested link froze the live picture (4 Nov 2026)
   hls = new Hls({ liveSyncDuration: 20, maxBufferLength: 30, backBufferLength: 90 });
   hls.on(Hls.Events.ERROR, (_, d) => {
@@ -354,8 +412,8 @@ function renderStreams() {
   box.querySelectorAll('.sess').forEach((b) => b.onclick = () => load(b.dataset.s, b.dataset.id, !!b.dataset.live));
 }
 async function loadState() {
-  try { state = await api('/api/state'); }
-  catch (e) { $('warnings').innerHTML = `<div>ติดต่อเซิร์ฟเวอร์ไม่ได้: ${esc(e.message)}</div>`; return; }
+  try { state = await api('/api/state'); stateAt = Date.now(); stateStale = false; }
+  catch (e) { $('warnings').innerHTML = `<div>ติดต่อเซิร์ฟเวอร์ไม่ได้: ${esc(e.message)}</div>`; stateStale = true; renderRestream(); return; }
   $('warnings').innerHTML = state.warnings.map((w) => `<div>${esc(w)}</div>`).join('');
   $('storage').textContent = state.storage === 'wasabi' ? 'เก็บคลิปที่ Wasabi' : 'เก็บคลิปในเครื่องเท่านั้น';
   $('disk').textContent = `ดิสก์ว่าง ${state.disk.free_gb} / ${state.disk.total_gb} GB`;
@@ -393,6 +451,7 @@ async function loadState() {
   }
   renderStreams();
   renderReplays();
+  renderRestream();
   renderReplayCard();
 }
 // a monitor tab left in the background falls behind (the browser throttles it): catch up on
@@ -513,8 +572,201 @@ $('rpStart').onclick = async () => {
   finally { renderReplayCard(); }
 };
 
+// ---- restream: push the LIVE stage to several platforms; every action needs the PIN ----
+// "streaming" = the platform's ingest took the stream and bytes are leaving. This page cannot see
+// whether the broadcast is public, so no wording here says "on air".
+const RS = { off: 'ยังไม่ได้ส่ง', connecting: 'กำลังเชื่อมต่อ', streaming: 'ส่งถึงปลายทางแล้ว', stalled: 'ไม่มีข้อมูลออก',
+  retrying: 'ช่องนี้หลุด กำลังต่อใหม่', waiting: 'รอสัญญาณเวที', stopping: 'กำลังหยุด', stopped: 'หยุดส่งแล้ว', failed: 'ล้มเหลว' };
+const RS_ON = ['connecting', 'streaming', 'stalled', 'retrying', 'waiting', 'stopping'];
+const RS_PLATFORM = [
+  [/youtube\.com/, 'YouTube: ตั้ง Auto-start ปิด (ภาพจะเข้าแค่ preview จนกด Go Live ใน Studio) และ Auto-stop ปิด · จบรายการต้องกดจบใน Studio เอง'],
+  [/facebook\.com/, 'Facebook: ต้องกด Go live ใน Live Producer เอง · ปิดตัวเลือกจบไลฟ์เมื่อสัญญาณหยุด · ถ้าสัญญาณขาดเกิน 2–3 นาที ไลฟ์เดิมจะจบ ต้องสร้างไลฟ์และ key ใหม่ · ไลฟ์ได้ไม่เกิน 8 ชม.'],
+  [/tiktok/, 'TikTok: Server URL กับ key ใหม่ทุกไลฟ์ ต้องเริ่มส่งภายในไม่กี่นาทีหลังกดสร้าง · ปิด "End LIVE if stream stops" · เลือก Screen adaptation = Original ถ้าไม่อยากโดนครอป · ห้ามมี QR หรือโลโก้แพลตฟอร์มอื่นบนภาพ'],
+];
+const rsPlatform = (server) => (RS_PLATFORM.find(([re]) => re.test(server || '')) || [])[1] || '';
+const rsDay = (ms) => `${fmtD.format(ms)} ${hm(ms)}`;
+let rsEdit = null;    // id being edited, '' for a new one, null = form closed
+let rsPinMem = null;  // the PIN lives in this page only: a closed or restored tab asks again
+const rsExtra = new Set();   // stages typed in by hand, to prepare destinations before their first signal
+let stateAt = null, stateStale = false;   // when /api/state last answered; true while it does not
+function rsStage() { return $('rsStage').value; }
+function rsDests() { const st = state && state.restream && state.restream.stages[rsStage()]; return (st && st.dests) || []; }
+function rsKeyInfo(d) {
+  return [d.key_tail ? `key …${d.key_tail}` : d.has_key ? 'มี key' : 'ยังไม่มี key', d.key_saved_at ? `บันทึก ${rsDay(d.key_saved_at * 1000)}` : ''].filter(Boolean).join(' · ');
+}
+function renderRestream() {
+  const rs = state && state.restream;
+  if (!rs) return;
+  const all = Object.entries(rs.stages).flatMap(([stage, st]) => st.dests.map((d) => ({ ...d, stage })));
+  const on = all.filter((d) => RS_ON.includes(d.status));
+  const count = (list) => list.length ? Object.entries(list.reduce((m, d) => (m[d.stage] = (m[d.stage] || 0) + 1, m), {})).map(([k, n]) => `${k} ${n}`).join(', ') : '';
+  const sending = on.filter((d) => d.status === 'streaming'), trouble = on.filter((d) => d.status === 'stalled' || d.status === 'retrying');
+  const idle = on.filter((d) => ['waiting', 'connecting'].includes(d.status)), stopping = on.filter((d) => d.status === 'stopping');
+  $('rsChip').hidden = !on.length;
+  $('rsChip').textContent = (stateStale ? 'Restream ไม่ทราบสถานะ · ล่าสุด: ' : 'Restream · ')
+    + [sending.length ? `ส่งถึงปลายทาง ${count(sending)}` : '', idle.length ? `รอ/กำลังต่อ ${count(idle)} (จะส่งเองเมื่อพร้อม)` : '',
+      trouble.length ? `มีปัญหา ${count(trouble)}` : '', stopping.length ? `กำลังหยุด ${count(stopping)}` : ''].filter(Boolean).join(' · ');
+  $('rsOff').hidden = rs.enabled;
+  $('rsOff').textContent = rs.enabled ? '' : 'Restream ปิดอยู่: ผู้ดูแลต้องตั้ง RESTREAM_PIN (12 ตัวขึ้นไป) ใน .env ของเซิร์ฟเวอร์ก่อน';
+  $('rsBody').hidden = !rs.enabled;
+  $('rsWindow').textContent = rs.window_min;
+  if (!rs.enabled) return;
+  $('rsStale').hidden = !stateStale;
+  $('rsStale').textContent = stateStale ? `ติดต่อเซิร์ฟเวอร์ไม่ได้ ไม่ทราบสถานะตอนนี้ · ที่เห็นคือข้อมูลเมื่อ ${stateAt ? clock(stateAt).slice(0, 8) : '?'} · เริ่มส่งไม่ได้จนกว่าจะติดต่อได้` : '';
+  // rebuild the stage list only when it changes, so the picker does not jump while in use
+  const names = [...new Set([...state.streams.map((x) => x.name), ...Object.keys(rs.stages), ...rsExtra])].sort();
+  const sel = $('rsStage');
+  if (names.join('|') !== [...sel.options].map((o) => o.value).join('|')) {
+    const keep = sel.value || (cur && cur.stream) || names[0] || '';
+    sel.innerHTML = names.map((n) => `<option>${esc(n)}</option>`).join('');
+    if (names.includes(keep)) sel.value = keep;
+  }
+  const stage = rsStage(), src = state.streams.find((x) => x.name === stage), st = rs.stages[stage] || { dests: [], log: [], hook: false, error: null };
+  const live = !!(src && src.receiving) && !stateStale;
+  $('rsSource').innerHTML = !stage ? 'ยังไม่มีเวที (รอเครื่องส่งต่อเข้ามาครั้งแรก)'
+    : src && src.receiving && src.kbps === 0 ? '<span style="color:var(--warn)">เครื่องส่งของเวทีต่ออยู่ แต่ไม่มีข้อมูลเข้ามา</span>'
+    : src && src.receiving ? `<span style="color:var(--ok)">เวทีมีสัญญาณ${src.kbps ? ' ' + (src.kbps / 1000).toFixed(1) + ' Mbps' : ''}</span>`
+    : src && src.receiving === null ? '<span style="color:var(--warn)">ติดต่อ MediaMTX ไม่ได้ ไม่รู้ว่าเวทีมีสัญญาณไหม</span>'
+    : '<span style="color:var(--live)">เวทีไม่มีสัญญาณ เริ่มส่งไม่ได้</span>';
+  $('rsNotes').textContent = [
+    cur && stage && cur.stream !== stage ? `ระวัง: ภาพที่เปิดดูอยู่คือเวที ${cur.stream} แต่การ์ดนี้ตั้งเป็นเวที ${stage}` : '',
+    st.hook ? `เวที ${stage} ยังมี YouTube push แบบเก่าเปิดค้างอยู่ (นอกการ์ดนี้) ต้องปิดก่อนจึงเริ่มส่งได้: cloud/set-youtube-key.sh <IP ของ VM> ${stage} --off` : '',
+    st.error ? `${st.error} · แถวที่เห็นคือช่องที่ยังส่งอยู่เท่านั้น แจ้งผู้ดูแล` : '',
+  ].filter(Boolean).join('\n');
+  const dests = st.dests;
+  $('rsStartAll').disabled = !live || !dests.some((d) => d.has_key && !RS_ON.includes(d.status));
+  $('rsStopAll').disabled = !dests.some((d) => RS_ON.includes(d.status));
+  $('rsAdd').disabled = !stage || !!st.error || dests.length >= rs.per_stage;
+  $('rsRows').innerHTML = dests.map((d) => {   // saved order, never re-sorted: a row must not move under the cursor
+    const run = RS_ON.includes(d.status), system = d.status === 'stopped' && d.by === 'system';
+    const cls = d.status === 'streaming' ? 'st-done' : (d.status === 'failed' || d.status === 'stalled' || system) ? 'st-failed' : run ? 'st-run' : 'dim';
+    const expired = d.key_expires && d.key_expires < state.now;
+    const exp = d.key_expires ? `<br><small class="${expired ? 'err' : 'dim'}">key ระบุหมดอายุ ${rsDay(d.key_expires * 1000)}${expired ? ' (เลยแล้ว: ถ้าหลุดอาจต่อกลับไม่ได้ ต้องขอ key ใหม่)' : ''}</small>` : '';
+    const info = [d.status === 'streaming' && d.kbps ? (d.kbps / 1000).toFixed(1) + ' Mbps' : '',
+      d.air ? 'ส่งออกไปแล้วรวม ' + dur(d.air) : '', d.retries ? `หลุด ${d.retries} ครั้ง` : '',
+      run && d.since ? `สถานะนี้ตั้งแต่ ${hm(d.since * 1000)}` : '', !run && d.at ? rsDay(d.at * 1000) : ''].filter(Boolean).join(' · ');
+    return `<tr><td>${esc(d.name)}<br><small class="dim">${esc(rsKeyInfo(d))}</small></td>
+      <td>${esc((d.server || '').replace(/^(rtmps?:\/\/[^/]+).*$/, '$1'))}${exp}</td>
+      <td class="${cls}">${system ? 'ระบบหยุดส่งเอง' : RS[d.status] || esc(d.status)}${info ? `<br><small class="dim">${info}</small>` : ''}
+        ${d.status === 'streaming' ? '<div class="dim">ตรวจที่แพลตฟอร์มว่าไลฟ์ขึ้นจริง</div>' : ''}
+        ${d.note ? `<div style="color:var(--warn)">${esc(d.note)}</div>` : ''}
+        ${d.text ? `<div class="${cls === 'st-failed' || d.status === 'retrying' ? 'err' : 'dim'}">${esc(d.text)}</div>` : ''}</td>
+      <td style="white-space:nowrap">${run ? `<button data-rs="stop" data-id="${esc(d.id)}" ${d.status === 'stopping' ? 'disabled' : ''}>หยุด</button>`
+        : `<button data-rs="start" data-id="${esc(d.id)}" ${live && d.has_key ? '' : 'disabled'}>เริ่มส่ง</button>
+           <button data-rs="edit" data-id="${esc(d.id)}">แก้</button> <button data-rs="del" data-id="${esc(d.id)}">ลบ</button>`}</td></tr>`;
+  }).join('') || (st.error ? '<tr><td colspan="4" class="err">อ่านรายการปลายทางของเวทีนี้ไม่ได้</td></tr>'
+    : '<tr><td colspan="4" class="dim">เวทีนี้ยังไม่มีปลายทาง กด "+ เพิ่มปลายทาง"</td></tr>');
+  $('rsRows').querySelectorAll('[data-rs]').forEach((b) => b.onclick = () => rsAction(b.dataset.rs, b.dataset.id));
+  $('rsLog').textContent = st.log.slice().reverse().map((e) => `${rsDay(e.at * 1000)}  ${e.dest}: ${e.text}`).join('\n') || 'ยังไม่มีเหตุการณ์';
+}
+// The PIN is kept in this page's memory only, and only after the server accepted it. Not in
+// sessionStorage: that survives "reopen closed tab" and session restore on a shared machine.
+async function rsPin() {
+  if (rsPinMem) return rsPinMem;
+  const pin = prompt('PIN สำหรับสั่ง Restream (ขอจากผู้ดูแลระบบ)');
+  if (!pin) throw new Error('ยกเลิก: ยังไม่ได้ใส่ PIN จึงยังไม่ได้ทำอะไร');
+  await api(`/api/restream/${encodeURIComponent(rsStage())}/pin`, { pin });
+  rsPinMem = pin;
+  return pin;
+}
+async function rsApi(path, body) {
+  const pin = await rsPin();
+  try { return await api(`/api/restream/${encodeURIComponent(rsStage())}/${path}`, { ...body, pin }); }
+  catch (e) {
+    if (e.pin) { rsPinMem = null; e.message += ' · คำสั่งนี้ยังไม่ได้ทำ กดใหม่แล้วใส่ PIN อีกครั้ง'; }
+    throw e;
+  }
+}
+function rsShowResults(res, verb) {
+  const name = (id) => (rsDests().find((d) => d.id === id) || {}).name || id.slice(0, 8);
+  $('rsMsg').textContent = (res.results || []).filter((r) => !r.ok || r.error)
+    .map((r) => `${verb} "${name(r.id)}"${r.ok ? '' : ' ไม่ได้'}: ${r.error}`).join('\n');
+}
+function rsConfirmStart(list) {
+  const stage = rsStage(), src = state.streams.find((x) => x.name === stage) || {};
+  const notes = [...new Set(list.map((d) => rsPlatform(d.server)).filter(Boolean))];
+  const stale = list.filter((d) => d.key_expires && d.key_expires < state.now).map((d) => `ระวัง: key ของ "${d.name}" ระบุหมดอายุไปแล้ว`);
+  return confirm([`ส่งเวที ${stage.toUpperCase()}${src.kbps ? ` (รับอยู่ ${(src.kbps / 1000).toFixed(1)} Mbps)` : ''} ออกไปยัง:`,
+    ...list.map((d) => `• ${d.name} (${rsKeyInfo(d)})`), ...stale, '', ...notes, '', 'เริ่มส่งจริงเดี๋ยวนี้?'].join('\n'));
+}
+async function rsAction(what, id) {
+  const d = rsDests().find((x) => x.id === id), msg = $('rsMsg');
+  if (!d) return;
+  msg.textContent = '';
+  try {
+    if (what === 'start') {
+      if (!rsConfirmStart([d])) return;
+      rsShowResults(await rsApi('start', { ids: [id] }), 'เริ่มส่ง');
+    } else if (what === 'stop') {
+      if (!confirm(`หยุดส่งเวที ${rsStage().toUpperCase()} ไปยัง "${d.name}"?\nแพลตฟอร์มจะเห็นว่าสัญญาณจบ แต่ไลฟ์ที่แพลตฟอร์มจะยังเปิดอยู่จนกว่าจะกดจบที่นั่น`)) return;
+      rsShowResults(await rsApi('stop', { ids: [id] }), 'หยุด');
+    } else if (what === 'del') {
+      if (!confirm(`ลบปลายทาง "${d.name}" และ key ที่เก็บไว้?`)) return;
+      await rsApi(`dest/${id}/delete`, {});
+    } else if (what === 'edit') {
+      rsOpenForm(d);
+      return;
+    }
+    await loadState();
+  } catch (e) { msg.textContent = e.message; }
+}
+function rsOpenForm(d) {
+  rsEdit = d ? d.id : '';
+  $('rsForm').hidden = false;
+  $('rsFormTitle').textContent = d ? `แก้ปลายทาง "${d.name}" ของเวที ${rsStage()}` : `เพิ่มปลายทางของเวที ${rsStage()}`;
+  $('rsName').value = d ? d.name : '';
+  $('rsKey').value = '';
+  $('rsKey').placeholder = d && d.has_key ? 'Stream key (เว้นว่าง = ใช้ key เดิม ถ้าไม่ได้เปลี่ยน Server)' : 'Stream key';
+  $('rsFormMsg').textContent = '';
+  if (d) { $('rsServer').value = d.server; $('rsPresetNote').textContent = rsPlatform(d.server); } else rsPresetChanged();
+}
+function rsPresetChanged() {
+  const [name, server] = $('rsPreset').value.split('|');
+  $('rsServer').value = server;
+  $('rsServer').placeholder = name === 'TikTok' ? 'วาง Server URL จากหน้า Go LIVE ของ TikTok' : 'Server เช่น rtmps://…/live2';
+  if (!$('rsName').value || ['YouTube', 'Facebook', 'TikTok'].includes($('rsName').value)) $('rsName').value = name;
+  $('rsPresetNote').textContent = rsPlatform(name === 'TikTok' ? 'tiktok' : server);
+}
+$('rsPreset').onchange = rsPresetChanged;
+$('rsServer').oninput = () => { $('rsPresetNote').textContent = rsPlatform($('rsServer').value); };
+$('rsStage').onchange = () => { $('rsForm').hidden = true; rsEdit = null; $('rsMsg').textContent = ''; renderRestream(); };
+$('rsAdd').onclick = () => rsOpenForm(null);
+$('rsNewStage').onclick = () => {
+  const name = (prompt('ชื่อเวที ต้องตรงกับชื่อที่เครื่องส่งใช้ (ตัวเล็ก a-z ตัวเลข - _) เช่น main หรือ xstage') || '').trim();
+  if (!name) return;
+  if (!/^[a-z0-9_-]{1,32}$/.test(name)) { $('rsMsg').textContent = 'ชื่อเวทีใช้ได้เฉพาะ a-z ตัวเลข - _ ไม่เกิน 32 ตัว'; return; }
+  rsExtra.add(name); renderRestream(); $('rsStage').value = name; $('rsStage').onchange();
+};
+$('rsCancel').onclick = () => { $('rsForm').hidden = true; rsEdit = null; };
+$('rsSave').onclick = async () => {
+  const msg = $('rsFormMsg'); msg.textContent = '';
+  $('rsSave').disabled = true;
+  try {
+    await rsApi('dest', { id: rsEdit || undefined, name: $('rsName').value.trim(), server: $('rsServer').value.trim(), key: $('rsKey').value.trim() });
+    $('rsKey').value = ''; $('rsForm').hidden = true; rsEdit = null;
+    await loadState();
+  } catch (e) { msg.textContent = e.message; }
+  finally { $('rsSave').disabled = false; }
+};
+$('rsStartAll').onclick = async () => {
+  const list = rsDests().filter((d) => d.has_key && !RS_ON.includes(d.status));
+  if (!list.length || !rsConfirmStart(list)) return;
+  $('rsMsg').textContent = '';
+  try { rsShowResults(await rsApi('start', { ids: list.map((d) => d.id) }), 'เริ่มส่ง'); await loadState(); }
+  catch (e) { $('rsMsg').textContent = e.message; }
+};
+$('rsStopAll').onclick = async () => {
+  const list = rsDests().filter((d) => RS_ON.includes(d.status));
+  if (!list.length || !confirm(`หยุดส่งเวที ${rsStage().toUpperCase()} ทั้ง ${list.length} ช่อง?\n${list.map((d) => '• ' + d.name).join('\n')}\nไลฟ์ที่แพลตฟอร์มจะยังเปิดอยู่จนกว่าจะกดจบที่นั่น`)) return;
+  $('rsMsg').textContent = '';
+  try { rsShowResults(await rsApi('stop', { ids: list.map((d) => d.id) }), 'หยุด'); await loadState(); }
+  catch (e) { $('rsMsg').textContent = e.message; }
+};
+
 renderPoints();
 loadState(); setInterval(loadState, 4000);
+// belt for the above: whatever the reason, state older than 12 s is not shown as current
+setInterval(() => { if (stateAt && !stateStale && Date.now() - stateAt > 12000) { stateStale = true; renderRestream(); } }, 2000);
 loadClips();
 requestAnimationFrame(tick);
 </script>

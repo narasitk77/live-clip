@@ -29,7 +29,12 @@ logLevel: info
 # Never set udpReadBufferSize above the host's net.core.rmem_max (212992 on Docker Desktop and
 # most NAS kernels): MediaMTX then refuses to open the SRT listener at all (reproduced 26 Oct).
 
-rtsp: no
+# RTSP is the web app's FALLBACK way to read a stage back for Restream (never published: port 8554 is
+# not in any compose "ports"). The first choice is SRT, which keeps the encoder's audio/video timing;
+# through RTSP audio lands 40-240 ms late (measured 10 Nov 2026), so it is used only for an encoder
+# whose timestamps make MediaMTX drop SRT readers. TCP only: no UDP/multicast listeners.
+rtsp: yes
+rtspTransports: [tcp]
 hls: no
 webrtc: no
 playback: no
@@ -74,11 +79,15 @@ authInternalUsers:
       - action: read
   # 2: the web app. docker-compose.cloud.yml sets this password from MEDIAMTX_API_PASS through
   #    MTX_AUTHINTERNALUSERS_2_PASS. Do not move.
+  #    "read" is for Restream (the web app reads a stage back and pushes it to the platforms).
+  #    ips: private ranges only, i.e. the docker network. Without it this password would also read
+  #    every stage from the internet through the published SRT/RTMP ports.
   - user: liveclip
     pass: sha256:0Ca3zq07I1NDFiKCFY5rfzq+fdaBwuepnpyDSXwDxP4=
-    ips: []
+    ips: ['10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16']
     permissions:
       - action: api
+      - action: read
   # 3: xstage = X stage (our OBS on the AIS 5G router). RTMP key xstage?user=xstage&pass=<XSTAGE_PUBLISH_PASS>
   #    SRT: streamid publish:xstage:xstage:<XSTAGE_PUBLISH_PASS> plus the SRT passphrase.
   - user: xstage
