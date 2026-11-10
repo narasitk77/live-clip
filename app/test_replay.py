@@ -21,7 +21,7 @@ with open(os.environ['FAKE_LOG'], 'a') as f:
     f.write(json.dumps({'argv': sys.argv[1:], 'cwd': sorted(os.listdir('.')),
                         'list': open('list.ffconcat').read()}) + '\n')
 signal.signal(signal.SIGTERM, lambda *a: sys.exit(255))
-dest = sys.argv[-1]
+dest = sys.argv[-1] + '/' + sys.argv[sys.argv.index('-rtmp_playpath') + 1]   # ffmpeg prints url + key
 speed = float(os.environ.get('FAKE_SPEED', '1'))   # seconds of picture per real second
 total = sum(float(l.split()[1]) for l in open('list.ffconcat') if l.startswith('duration'))
 def prog(t):
@@ -133,20 +133,28 @@ def raises(exc, fn, *a, **kw):
 
 def main():
     # ---- destination ----
-    assert app.replay_dest(' rtmps://a.rtmps.youtube.com:443/live2/ ', KEY) == \
-        (f'rtmps://a.rtmps.youtube.com:443/live2/{KEY}', 'rtmps://a.rtmps.youtube.com:443')
-    assert app.replay_dest('rtmp://1.2.3.4/live', 'k1')[0] == 'rtmp://1.2.3.4/live/k1'
+    d = app.rtmp_dest(' rtmps://a.rtmps.youtube.com:443/live2/ ', KEY)
+    assert (d['url'], d['app'], d['key'], d['shown']) == \
+        ('rtmps://a.rtmps.youtube.com:443/live2', 'live2', KEY, 'rtmps://a.rtmps.youtube.com:443'), d
+    assert KEY not in d['url'], 'the key travels as -rtmp_playpath, never inside the URL (ffmpeg cuts long URLs)'
+    assert app.rtmp_out_args(d) == ['-f', 'flv', '-flvflags', 'no_duration_filesize', '-rtmp_app', 'live2', '-rtmp_playpath', KEY,
+                                    '-tls_verify', '1', '-rw_timeout', '10000000', 'rtmps://a.rtmps.youtube.com:443/live2']
+    tiktok = 'stream-123?' + 'x=' + 'A' * 3000 + '&expire=1793900000&sign=abc'
+    d = app.rtmp_dest('rtmps://push.example.com:443/game/', tiktok)
+    assert d['app'] == 'game' and d['key'] == tiktok and d['expires'] == 1793900000, 'a 3,000-character signed key is accepted whole'
+    assert app.rtmp_dest('rtmp://1.2.3.4', 'xstage?user=x&pass=y')['app'] == '', 'a server without a path: empty app'
+    assert '-tls_verify' not in app.rtmp_out_args(app.rtmp_dest('rtmp://1.2.3.4/live', 'k1'))
     for server in ('http://x/live', 'file:///etc/passwd', 'rtmp://', 'rtmp://ho st/live', 'srt://x:1/a', ''):
-        assert raises(BadRequest, app.replay_dest, server, KEY), server
-    for key in ('', 'a b', 'x' * 513, None):
-        assert raises(BadRequest, app.replay_dest, 'rtmp://h/live', key), key
+        assert raises(BadRequest, app.rtmp_dest, server, KEY), server
+    for key in ('', 'a b', 'x' * 4097, 'line1\nline2', None):
+        assert raises(BadRequest, app.rtmp_dest, 'rtmp://h/live', key), key
     real_addrs = app.host_addrs
     app.host_addrs = lambda host: {'mediamtx': {'172.18.0.3'}, 'lan': {'192.168.1.20'}, 'meta': {'169.254.169.254'},
                                    'v6': {'fe80::1%eth0'}}.get(host) or (_ for _ in ()).throw(OSError('no such host'))
     for host in ('mediamtx', 'lan', 'meta', 'v6', 'nosuchhost'):
-        assert raises(BadRequest, app.replay_dest, f'rtmp://{host}/live', KEY), host
+        assert raises(BadRequest, app.rtmp_dest, f'rtmp://{host}/live', KEY), host
     app.REPLAY_ALLOW_HOSTS = {'lan'}
-    assert app.replay_dest('rtmp://lan/live', KEY)[1] == 'rtmp://lan', 'REPLAY_ALLOW_HOSTS lets a LAN server through'
+    assert app.rtmp_dest('rtmp://lan/live', KEY)['shown'] == 'rtmp://lan', 'REPLAY_ALLOW_HOSTS lets a LAN server through'
     app.REPLAY_ALLOW_HOSTS = set()
     app.host_addrs = real_addrs
     line = app.redact(f'[tcp] rtmps://a.rtmps.youtube.com:443/live2/{KEY}: Broken pipe {KEY}', KEY)
@@ -207,7 +215,8 @@ def main():
     c = calls(log)
     assert len(c) == 1, 'a refused key is not retried'
     argv = c[0]['argv']
-    assert argv[-1] == f'rtmps://a.rtmps.youtube.com:443/live2/{KEY}' and '-re' in argv and argv[argv.index('-c') + 1] == 'copy'
+    assert argv[-1] == 'rtmps://a.rtmps.youtube.com:443/live2' and argv[argv.index('-rtmp_playpath') + 1] == KEY
+    assert '-re' in argv and argv[argv.index('-c') + 1] == 'copy'
     assert argv[argv.index('-stream_loop') + 1] == '-1' and argv.index('-stream_loop') < argv.index('-i'), 'a loop is one connection'
     assert argv[argv.index('-tls_verify') + 1] == '1', 'rtmps checks the certificate'
     assert c[0]['cwd'] == ['list.ffconcat'] + [f'seg_{i:08d}.ts' for i in range(5)], c[0]['cwd']
@@ -238,7 +247,7 @@ def main():
     log = plan('run1,fail,fail,fail,fail')
     rec = wait_final(app.create_replay({**body, 'loop': True})['id'])
     assert rec['status'] == 'failed' and len(calls(log)) == 4, (rec, len(calls(log)))
-    assert rec['streamed'] >= 1, rec
+    assert rec['streamed'] >= 0.5, rec   # ~1 s on air, sampled every 50 ms
 
     # ---- stop button; limits while one is on air ----
     plan('hang')
