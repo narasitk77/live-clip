@@ -40,6 +40,8 @@ def on_air(seconds, frozen_after=None):
 if step == 'refuse':                    # the platform refuses the key: output never opens
     print('[tls @ 0x1] IO error: End of file', file=sys.stderr)
     print(f'[out#0/flv @ 0x2] Error opening output {url}/{key} I/O error', file=sys.stderr)
+    print(f'Error opening output file {url}/{key}.', file=sys.stderr)
+    print('Error opening output files: I/O error', file=sys.stderr)
     sys.exit(1)
 if step == 'nosrc':                     # ffmpeg cannot open the stage (RTSP off, no read permission)
     print('[in#0 @ 0x3] Error opening input: Server returned 401 Unauthorized', file=sys.stderr)
@@ -280,6 +282,8 @@ def main():
     assert v['status'] == 'failed' and 'ตรวจ Server' in v['text'] and 'End of file' in v['text'], v
     assert KY not in v['text'] and 'rtmp' not in v['text'] and 'mtx-secret' not in v['text'], v
     assert 'speed' not in v['text'] and 'bitrate' not in v['text'], 'progress lines are not error text'
+    assert '0x' not in v['text'] and '[tls] IO error: End of file' in v['text'] and v['text'].count('Error opening output') == 1, \
+        f'the cause reads without ffmpeg memory addresses or the same line three times: {v["text"]}'
     assert len(calls(KY)) == 2 and not v['armed'], 'a refused key is tried twice, then nothing resurrects it'
     assert any('YT public' in w and 'ล้มเหลว' in w for w in app.WARNINGS.values()), 'a failure shows in the bar on every page'
 
