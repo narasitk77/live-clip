@@ -677,6 +677,14 @@ def rtmp_out_args(dest):
             *tls, '-rw_timeout', '10000000', dest['url']]
 
 
+REPEATED_RE = re.compile(r'^Error opening (in|out)put files?\b')   # ffmpeg says it three times; the first is the specific one
+
+
+def tidy(line):
+    """An ffmpeg log line for the page: "[tls @ 0x7f34...] IO error" -> "[tls] IO error"."""
+    return re.sub(r'\[([^\]@]+?) @ 0x[0-9a-f]+\]', r'[\1]', line)
+
+
 def redact(line, *secrets):
     """ffmpeg prints its URLs on most errors: the destination, and the MediaMTX login in rtsp://.
     Every string that reaches the log or the page goes through here, exception text included."""
@@ -872,8 +880,9 @@ def run_replay(rid, segs):
                     continue
                 line = redact(line, run['dest']['key'])
                 if line:
-                    tail.append(line[-200:])
                     log.info('replay %s: %s', rid[:8], line[-300:])
+                    if not REPEATED_RE.match(line):
+                        tail.append(tidy(line)[-200:])
             rc = proc.wait()
             rec['streamed'] = round(rec['streamed'] + sent, 1)
             if run['stop'].is_set():
@@ -1420,8 +1429,9 @@ def run_push(stage, did):
                                         stage, did[:8], run['ts_warn'], line[-160:])
                         continue
                     if line:
-                        tail.append(line[-200:])
                         log.info('restream %s/%s: %s', stage, did[:8], line[-300:])
+                        if not REPEATED_RE.match(line):
+                            tail.append(tidy(line)[-200:])
                 rc = proc.wait()
             sent, killed = run['sent'], run['killed']
             run.update(proc=None, kbps=None, air=run['air'] + sent, sent=0.0, advance_at=None)
