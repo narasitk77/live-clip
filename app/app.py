@@ -82,6 +82,13 @@ class BadRequest(Exception):
     pass
 
 
+class ClipGone(BadRequest):
+    """The clip was deleted while a writer still held its record."""
+
+    def __init__(self):
+        super().__init__('ไม่พบคลิปนี้ (ถูกลบไปแล้ว)')
+
+
 class Forbidden(Exception):
     """Wrong or missing RESTREAM_PIN."""
 
@@ -352,16 +359,25 @@ def clip_path(cid, ext):
     return CLIPS / f'{cid}.{ext}'
 
 
+def _write_clip(clip):   # caller holds LOCK
+    tmp = clip_path(clip['id'], 'json.tmp')
+    tmp.write_text(json.dumps(clip, ensure_ascii=False))
+    tmp.replace(clip_path(clip['id'], 'json'))
+
+
 def save_clip(clip):
     with LOCK:
-        tmp = clip_path(clip['id'], 'json.tmp')
-        tmp.write_text(json.dumps(clip, ensure_ascii=False))
-        tmp.replace(clip_path(clip['id'], 'json'))
+        _write_clip(clip)
 
 
 def update_clip(clip, **fields):
+    """Change a clip that exists. One deleted meanwhile stays deleted: a late writer (a retry,
+    the janitor) holding the old record must not bring it back into the list."""
     clip.update(fields)
-    save_clip(clip)
+    with LOCK:
+        if not clip_path(clip['id'], 'json').exists():
+            raise ClipGone()
+        _write_clip(clip)
 
 
 def load_clips():
@@ -369,6 +385,8 @@ def load_clips():
     for p in CLIPS.glob('*.json'):
         try:
             out.append(json.loads(p.read_text()))
+        except FileNotFoundError:
+            continue  # deleted between the listing and this read: gone, not damaged
         except (OSError, ValueError) as e:
             out.append({'id': p.stem, 'name': p.name, 'status': 'failed', 'created': 0,
                         'error': f'อ่านข้อมูลคลิปไม่ได้: {e}'})
@@ -378,10 +396,10 @@ def load_clips():
 def load_clip(cid):
     if not CLIP_ID_RE.match(cid or ''):
         raise BadRequest('รหัสคลิปไม่ถูกต้อง')
-    p = clip_path(cid, 'json')
-    if not p.exists():
+    try:
+        return json.loads(clip_path(cid, 'json').read_text())
+    except FileNotFoundError:
         raise BadRequest('ไม่พบคลิปนี้')
-    return json.loads(p.read_text())
 
 
 def has_local_file(clip):
@@ -581,14 +599,61 @@ def presign(clip):
 
 
 def retry_clip(cid):
-    clip = load_clip(cid)
-    if clip.get('status') != 'failed':
-        raise BadRequest('ลองใหม่ได้เฉพาะคลิปที่ล้มเหลว')
-    # an mp4 only exists after the cut passed its length check, so never cut it again
-    stage = 'upload' if has_local_file(clip) else 'cut'
-    update_clip(clip, status='queued', error=None, failed_stage=stage)
-    submit(cid, stage)
+    # One step under LOCK: a second retry (double click, two editors) sees 'queued' and is refused,
+    # so a clip never has two jobs. delete_clip relies on that: no job in RUNNING means none exists.
+    with LOCK:
+        clip = load_clip(cid)
+        if clip.get('status') != 'failed':
+            raise BadRequest('ลองใหม่ได้เฉพาะคลิปที่ล้มเหลว')
+        if any(c == cid for c, _ in RUNNING):  # the failed job wrote its result but has not left RUNNING yet
+            raise BadRequest('งานก่อนหน้ายังปิดไม่เสร็จ กดลองใหม่อีกครั้ง')
+        # an mp4 only exists after the cut passed its length check, so never cut it again
+        stage = 'upload' if has_local_file(clip) else 'cut'
+        clip.update(status='queued', error=None, failed_stage=stage)
+        _write_clip(clip)
+        RUNNING.add((cid, stage))
+    (CUT_POOL if stage == 'cut' else UPLOAD_POOL).submit(run_job, cid, stage)
     return clip
+
+
+def delete_clip(cid, seen=None):
+    """Remove a clip for good: the file on this server, its record and any leftover work dir.
+    A copy that already reached Wasabi is left in the bucket; the reply names it, so nobody
+    takes "deleted" to mean the archive copy is gone too. `seen` is the status the page was
+    showing: lists are up to 10 s old, and a "failed" row someone else has just retried into a
+    finished clip must not be deleted on the strength of the old row."""
+    if not CLIP_ID_RE.match(cid or ''):
+        raise BadRequest('รหัสคลิปไม่ถูกต้อง')
+    jp = clip_path(cid, 'json')
+    with LOCK:  # one step against retry and the janitor: they write through update_clip, under this lock
+        try:
+            clip = json.loads(jp.read_text())
+        except FileNotFoundError:
+            raise BadRequest('ไม่พบคลิปนี้')
+        except ValueError:
+            clip = None  # a record nobody can read is exactly what someone wants out of the list
+        if not isinstance(clip, dict):
+            clip = {}
+        if clip.get('status') in IN_PROGRESS or any(c == cid for c, _ in RUNNING):
+            raise ClipError('คลิปนี้กำลังตัดหรืออัปโหลดอยู่ รอให้เสร็จหรือขึ้นว่าล้มเหลวก่อน แล้วค่อยลบ')
+        if seen is not None and clip and clip.get('status') != seen:
+            raise ClipError('สถานะของคลิปนี้เปลี่ยนไปแล้ว ดูรายการใหม่ก่อนลบ')
+        kept, maybe = clip.get('s3_key') or None, None
+        if not kept and clip.get('storage') == 'wasabi' and clip.get('failed_stage') == 'upload':
+            try:
+                maybe = s3_key(clip)  # an upload can land without being recorded (the check after it failed)
+            except (KeyError, TypeError, ValueError):
+                pass
+        # the file first: if it cannot be removed the record stays, and the clip is still in the
+        # list to try again, instead of an mp4 nobody can see filling the disk
+        clip_path(cid, 'mp4').unlink(missing_ok=True)
+        jp.unlink()
+    shutil.rmtree(CLIPS / f'tmp-{cid}', ignore_errors=True)
+    log.info('clip %s deleted (%r) wasabi=%r maybe=%r', cid, clip.get('name'), kept, maybe)
+    reply = {'ok': True, 'wasabi_kept': kept}
+    if maybe:
+        reply['wasabi_maybe'] = maybe
+    return reply
 
 
 def stage_after_interruption(clip):
@@ -1758,16 +1823,19 @@ def janitor_once(now=None):
         cid = c['id']
         p = clip_path(cid, 'mp4')
         # Only copies that are safely on Wasabi are removed; a local-only clip is the only copy.
-        if (c.get('status') == 'done' and c.get('s3_key') and p.exists()
-                and now - c.get('created', now) > LOCAL_CLIP_HOURS * 3600):
-            p.unlink()
-            update_clip(c, local=False)
-        # A job that is "in progress" but not in any pool died without recording its result.
-        if c.get('status') in IN_PROGRESS and cid not in running and CLIP_ID_RE.match(cid):
-            jp = clip_path(cid, 'json')
-            if jp.exists() and now - jp.stat().st_mtime > 120:
-                update_clip(c, status='failed', failed_stage=stage_after_interruption(c),
-                            error='งานหยุดกลางคันโดยไม่ได้บันทึกผล กด "ลองใหม่"')
+        try:
+            if (c.get('status') == 'done' and c.get('s3_key') and p.exists()
+                    and now - c.get('created', now) > LOCAL_CLIP_HOURS * 3600):
+                p.unlink(missing_ok=True)
+                update_clip(c, local=False)
+            # A job that is "in progress" but not in any pool died without recording its result.
+            if c.get('status') in IN_PROGRESS and cid not in running and CLIP_ID_RE.match(cid):
+                jp = clip_path(cid, 'json')
+                if jp.exists() and now - jp.stat().st_mtime > 120:
+                    update_clip(c, status='failed', failed_stage=stage_after_interruption(c),
+                                error='งานหยุดกลางคันโดยไม่ได้บันทึกผล กด "ลองใหม่"')
+        except (ClipGone, FileNotFoundError):
+            continue  # someone deleted it between the listing and here
     for t in CLIPS.glob('tmp-*'):
         if t.name[4:] not in running and now - t.stat().st_mtime > 6 * 3600:
             shutil.rmtree(t, ignore_errors=True)
@@ -1818,6 +1886,21 @@ class Handler(BaseHTTPRequestHandler):
 
     def log_message(self, fmt, *args):
         log.info('%s %s', self.address_string(), fmt % args)
+
+    def parse_request(self):
+        ok = super().parse_request()
+        # A request that declares a body we may never read (401, 415, any GET) must not leave it on
+        # a kept-alive connection: it would be parsed as the next request, and behind a proxy that
+        # pools connections the next request is someone else's, with their login.
+        if ok and ((self.headers.get('Content-Length') or '0').strip() != '0'
+                   or self.headers.get('Transfer-Encoding')):
+            self.close_connection = True
+        return ok
+
+    def end_headers(self):
+        if self.close_connection:
+            self.send_header('Connection', 'close')  # the proxy must not put this connection back in its pool
+        super().end_headers()
 
     def log_request(self, code='-', size='-'):
         # the UI polls every few seconds; only log what someone would act on
@@ -1905,16 +1988,20 @@ class Handler(BaseHTTPRequestHandler):
 
     def download(self, cid):
         clip = load_clip(cid)
-        p = clip_path(cid, 'mp4')
-        if p.exists() and clip.get('local'):
-            size = p.stat().st_size
-            self.send_response(200)
-            self.send_header('Content-Type', 'video/mp4')
-            self.send_header('Content-Length', str(size))
-            self.send_header('Content-Disposition', content_disposition(clip['name']))
-            self.end_headers()
-            if self.command != 'HEAD':
-                with p.open('rb') as f:
+        f = None
+        if clip.get('local'):
+            try:  # opened before any header: a clip deleted right now is a 404, not a 200 that breaks off
+                f = clip_path(cid, 'mp4').open('rb')
+            except FileNotFoundError:
+                pass
+        if f:
+            with f:
+                self.send_response(200)
+                self.send_header('Content-Type', 'video/mp4')
+                self.send_header('Content-Length', str(os.fstat(f.fileno()).st_size))
+                self.send_header('Content-Disposition', content_disposition(clip['name']))
+                self.end_headers()
+                if self.command != 'HEAD':
                     shutil.copyfileobj(f, self.wfile, 1024 * 1024)
             return
         if clip.get('s3_key') and S3_ON:
@@ -1942,6 +2029,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.json(create_clip(body), 201)
             if len(parts) == 4 and parts[:2] == ['api', 'clips'] and parts[3] == 'retry':
                 return self.json(retry_clip(parts[2]))
+            if len(parts) == 4 and parts[:2] == ['api', 'clips'] and parts[3] == 'delete':
+                return self.json(delete_clip(parts[2], body.get('status')))
             if path == '/api/replays':
                 return self.json(create_replay(body), 201)
             if len(parts) == 4 and parts[:2] == ['api', 'replays'] and parts[3] == 'stop':
