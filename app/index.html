@@ -580,7 +580,7 @@ const RS = { off: 'ยังไม่ได้ส่ง', connecting: 'กำล
 const RS_ON = ['connecting', 'streaming', 'stalled', 'retrying', 'waiting', 'stopping'];
 const RS_PLATFORM = [
   [/youtube\.com/, 'YouTube: ตั้ง Auto-start ปิด (ภาพจะเข้าแค่ preview จนกด Go Live ใน Studio) และ Auto-stop ปิด · จบรายการต้องกดจบใน Studio เอง'],
-  [/facebook\.com/, 'Facebook: ต้องกด Go live ใน Live Producer เอง · ปิดตัวเลือกจบไลฟ์เมื่อสัญญาณหยุด · ถ้าสัญญาณขาดเกิน 2–3 นาที ไลฟ์เดิมจะจบ ต้องสร้างไลฟ์และ key ใหม่ · ไลฟ์ได้ไม่เกิน 8 ชม.'],
+  [/facebook\.com/, 'Facebook: ก่อนกด Go Live ทุกครั้ง ปิด "Allow encoder to end stream" ที่ Settings → Stream ใน Live Producer (ค่านี้กลับมาเปิดเองทุกไลฟ์) ถ้าเปิดค้างไว้ สัญญาณเวทีหลุดครั้งเดียวไลฟ์จะจบทันที ต้องสร้างไลฟ์และ key ใหม่ · ต้องกด Go Live ใน Live Producer เอง · ถ้าสัญญาณขาดเกิน 2–3 นาที ไลฟ์เดิมจะจบ · ไลฟ์ได้ไม่เกิน 8 ชม.'],
   [/tiktok/, 'TikTok: Server URL กับ key ใหม่ทุกไลฟ์ ต้องเริ่มส่งภายในไม่กี่นาทีหลังกดสร้าง · ปิด "End LIVE if stream stops" · เลือก Screen adaptation = Original ถ้าไม่อยากโดนครอป · ห้ามมี QR หรือโลโก้แพลตฟอร์มอื่นบนภาพ'],
 ];
 const rsPlatform = (server) => (RS_PLATFORM.find(([re]) => re.test(server || '')) || [])[1] || '';
