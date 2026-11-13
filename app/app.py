@@ -619,9 +619,11 @@ def retry_clip(cid):
 def delete_clip(cid, seen=None):
     """Remove a clip for good: the file on this server, its record and any leftover work dir.
     A copy that already reached Wasabi is left in the bucket; the reply names it, so nobody
-    takes "deleted" to mean the archive copy is gone too. `seen` is the status the page was
-    showing: lists are up to 10 s old, and a "failed" row someone else has just retried into a
-    finished clip must not be deleted on the strength of the old row."""
+    takes "deleted" to mean the archive copy is gone too. `seen` is what the page's row showed
+    ({status, failed_stage, local}): lists are up to 10 s old (longer while the confirm is open),
+    and a row someone else has since retried must not be deleted on the strength of the old row.
+    Status alone is not enough: a failed cut retried into a good mp4 whose upload then fails is
+    "failed" again, now holding the only copy."""
     if not CLIP_ID_RE.match(cid or ''):
         raise BadRequest('รหัสคลิปไม่ถูกต้อง')
     jp = clip_path(cid, 'json')
@@ -636,7 +638,8 @@ def delete_clip(cid, seen=None):
             clip = {}
         if clip.get('status') in IN_PROGRESS or any(c == cid for c, _ in RUNNING):
             raise ClipError('คลิปนี้กำลังตัดหรืออัปโหลดอยู่ รอให้เสร็จหรือขึ้นว่าล้มเหลวก่อน แล้วค่อยลบ')
-        if seen is not None and clip and clip.get('status') != seen:
+        cur = {'status': clip.get('status'), 'failed_stage': clip.get('failed_stage'), 'local': bool(clip.get('local'))}
+        if seen and clip and any(cur[k] != v for k, v in seen.items() if k in cur):
             raise ClipError('สถานะของคลิปนี้เปลี่ยนไปแล้ว ดูรายการใหม่ก่อนลบ')
         kept, maybe = clip.get('s3_key') or None, None
         if not kept and clip.get('storage') == 'wasabi' and clip.get('failed_stage') == 'upload':
@@ -1837,7 +1840,11 @@ def janitor_once(now=None):
         except (ClipGone, FileNotFoundError):
             continue  # someone deleted it between the listing and here
     for t in CLIPS.glob('tmp-*'):
-        if t.name[4:] not in running and now - t.stat().st_mtime > 6 * 3600:
+        try:
+            m = t.stat().st_mtime
+        except FileNotFoundError:
+            continue  # its clip was deleted between the listing and here
+        if t.name[4:] not in running and now - m > 6 * 3600:
             shutil.rmtree(t, ignore_errors=True)
     janitor_replays(now)
     repair_restreams(now)
@@ -2030,7 +2037,7 @@ class Handler(BaseHTTPRequestHandler):
             if len(parts) == 4 and parts[:2] == ['api', 'clips'] and parts[3] == 'retry':
                 return self.json(retry_clip(parts[2]))
             if len(parts) == 4 and parts[:2] == ['api', 'clips'] and parts[3] == 'delete':
-                return self.json(delete_clip(parts[2], body.get('status')))
+                return self.json(delete_clip(parts[2], {k: body[k] for k in ('status', 'failed_stage', 'local') if k in body}))
             if path == '/api/replays':
                 return self.json(create_replay(body), 201)
             if len(parts) == 4 and parts[:2] == ['api', 'replays'] and parts[3] == 'stop':

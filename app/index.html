@@ -512,8 +512,8 @@ function renderClips(clips) {
     if (!confirm(`ลบคลิป "${c.name}"${when}?\nไฟล์จะถูกลบออกจากเซิร์ฟเวอร์ถาวร กู้คืนไม่ได้ และหายจากรายการของทุกคน`
       + (c.s3_key ? '\nไฟล์บน Wasabi จะยังอยู่ ต้องลบที่ Wasabi เอง'
         : half ? '\nคลิปนี้อัปโหลดค้างไว้ อาจมีไฟล์อยู่บน Wasabi แล้ว ซึ่งปุ่มนี้ไม่ลบให้' : ''))) return;
-    try {  // status: what this row showed, so the server can refuse if the clip has changed since
-      const r = await api(`/api/clips/${c.id}/delete`, { status: c.status });
+    try {  // what this row showed, so the server can refuse if the clip has changed since
+      const r = await api(`/api/clips/${c.id}/delete`, { status: c.status, failed_stage: c.failed_stage ?? null, local: !!c.local });
       if (r.wasabi_kept) alert(`ลบออกจากเซิร์ฟเวอร์และรายการแล้ว\nไฟล์บน Wasabi ยังอยู่ที่ ${r.wasabi_kept}`);
       else if (r.wasabi_maybe) alert(`ลบออกจากเซิร์ฟเวอร์และรายการแล้ว\nอาจมีไฟล์ค้างบน Wasabi ที่ ${r.wasabi_maybe} ตรวจและลบที่ Wasabi เอง`);
     } catch (e) { alert(e.message); }

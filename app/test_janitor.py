@@ -157,9 +157,17 @@ assert app.clip_path(B, 'mp4').exists() and app.clip_path(D, 'mp4').exists(), 'o
 clip(O, 'done', None, 60, storage='local')
 (app.CLIPS / f'tmp-{O}').mkdir()
 (app.CLIPS / f'tmp-{O}' / 'seg_1.ts').write_bytes(b'x')
-assert refused(lambda: app.delete_clip(O, 'failed'), app.ClipError) and app.clip_path(O, 'mp4').exists(), \
+assert refused(lambda: app.delete_clip(O, {'status': 'failed'}), app.ClipError) and app.clip_path(O, 'mp4').exists(), \
     'the row said failed, the clip is done now (someone retried it): not deleted on the strength of the old row'
-assert app.delete_clip(O, 'done')['ok'] and not (app.CLIPS / f'tmp-{O}').exists(), 'the work dir goes with the clip'
+assert app.delete_clip(O, {'status': 'done'})['ok'] and not (app.CLIPS / f'tmp-{O}').exists(), 'the work dir goes with the clip'
+app.save_clip({'id': O, 'name': O, 'status': 'failed', 'failed_stage': 'upload', 'local': True, 'storage': 'wasabi', 's3_key': None, 'created': NOW})
+app.clip_path(O, 'mp4').write_bytes(b'mp4')   # a failed cut someone retried: good mp4, then the upload failed
+assert refused(lambda: app.delete_clip(O, {'status': 'failed', 'failed_stage': 'cut', 'local': False}), app.ClipError) \
+    and app.clip_path(O, 'mp4').exists(), 'still "failed", but no longer the failed cut the row showed: the only copy stays'
+assert app.delete_clip(O, {'status': 'failed', 'failed_stage': 'upload', 'local': True})['ok']
+os.symlink(app.CLIPS / 'gone', app.CLIPS / f'tmp-{O}')   # a work dir deleted between the janitor's listing and its stat
+app.janitor_once(NOW)                                    # must not abort the pass
+(app.CLIPS / f'tmp-{O}').unlink()
 
 os.symlink(app.CLIPS / 'nowhere.json', app.clip_path(P, 'json'))   # stands in for a record deleted between the listing and the read
 assert P not in [c['id'] for c in app.load_clips()], 'a record that vanished mid-listing is not shown as a damaged clip'
