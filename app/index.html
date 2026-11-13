@@ -495,11 +495,28 @@ function renderClips(clips) {
       <td>${c.t_in ? clock(c.t_in * 1000) + '–' + clock(c.t_out * 1000) : ''}</td>
       <td>${c.duration ? dur(c.duration) : c.t_in ? dur(c.t_out - c.t_in) : ''}${c.gap > 0.5 ? `<br><small class="err">สัญญาณขาด ${c.gap} วิ</small>` : ''}${c.preroll > 0.05 ? `<br><small class="dim">เริ่มก่อน In ${c.preroll} วิ</small>` : ''}</td>
       <td class="${cls}">${STATUS[c.status] || esc(c.status)}${where ? `<br><small class="dim">${where}</small>` : ''}${c.error ? `<div class="err">${esc(c.error)}</div>` : ''}</td>
-      <td>${canDl ? `<a href="/clips/${esc(c.id)}/download"><button>ดาวน์โหลด</button></a>` : ''}
-          ${c.status === 'failed' ? `<button data-retry="${esc(c.id)}">ลองใหม่</button>` : ''}${busy ? '…' : ''}</td></tr>`;
+      <td>${canDl ? `<a href="/clips/${esc(c.id)}/download" download><button>ดาวน์โหลด</button></a>` : ''}
+          ${c.status === 'failed' ? `<button data-retry="${esc(c.id)}">ลองใหม่</button>` : ''}
+          ${busy ? '…' : `<button data-del="${esc(c.id)}">ลบ</button>`}</td></tr>`;
   }).join('') || '<tr><td colspan="5" class="dim">ยังไม่มีคลิป</td></tr>';
+  // ponytail: the server lists the newest 300 only; say so instead of paging, older clips move up as rows are deleted
+  if (clips.length >= 300) $('clips').insertAdjacentHTML('beforeend', '<tr><td colspan="5" class="dim">แสดง 300 คลิปล่าสุด อาจมีคลิปเก่ากว่านี้อีก ลบคลิปในรายการแล้วคลิปเก่าจะเลื่อนขึ้นมา</td></tr>');
   $('clips').querySelectorAll('[data-retry]').forEach((b) => b.onclick = async () => {
     try { await api(`/api/clips/${b.dataset.retry}/retry`, {}); } catch (e) { alert(e.message); }
+    loadClips();
+  });
+  $('clips').querySelectorAll('[data-del]').forEach((b) => b.onclick = async () => {
+    const c = clips.find((x) => x.id === b.dataset.del);
+    const when = c.t_in ? ` ${clock(c.t_in * 1000)}–${clock(c.t_out * 1000)}` : '';
+    const half = !c.s3_key && c.storage === 'wasabi' && c.failed_stage === 'upload';  // the upload may have landed unrecorded
+    if (!confirm(`ลบคลิป "${c.name}"${when}?\nไฟล์จะถูกลบออกจากเซิร์ฟเวอร์ถาวร กู้คืนไม่ได้ และหายจากรายการของทุกคน`
+      + (c.s3_key ? '\nไฟล์บน Wasabi จะยังอยู่ ต้องลบที่ Wasabi เอง'
+        : half ? '\nคลิปนี้อัปโหลดค้างไว้ อาจมีไฟล์อยู่บน Wasabi แล้ว ซึ่งปุ่มนี้ไม่ลบให้' : ''))) return;
+    try {  // what this row showed, so the server can refuse if the clip has changed since
+      const r = await api(`/api/clips/${c.id}/delete`, { status: c.status, failed_stage: c.failed_stage ?? null, local: !!c.local });
+      if (r.wasabi_kept) alert(`ลบออกจากเซิร์ฟเวอร์และรายการแล้ว\nไฟล์บน Wasabi ยังอยู่ที่ ${r.wasabi_kept}`);
+      else if (r.wasabi_maybe) alert(`ลบออกจากเซิร์ฟเวอร์และรายการแล้ว\nอาจมีไฟล์ค้างบน Wasabi ที่ ${r.wasabi_maybe} ตรวจและลบที่ Wasabi เอง`);
+    } catch (e) { alert(e.message); }
     loadClips();
   });
 }
